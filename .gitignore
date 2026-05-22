@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# third_party dependencies (managed separately)
+third_party/
+
+# openspec design docs (managed separately)
+openspec/
+
+# External deps downloaded by mujoco_playground
+mujoco_playground/external_deps/
+
+# Large assets
+*.mjcf.bak
+*.xml.bak
+*.urdf
+
+# Training artifacts
+checkpoints/
+logs/
+wandb/
+outputs/
+results/
+
+# Temporary files
+*.tmp
+*.bak
+*~
