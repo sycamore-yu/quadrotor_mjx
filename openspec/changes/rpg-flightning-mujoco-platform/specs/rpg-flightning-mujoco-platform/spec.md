@@ -53,7 +53,10 @@ The platform SHALL provide three scene tasks: `hover_obstacle`, `gate_crossing`,
 ### Requirement: Three Algorithm Training Matrix
 The platform SHALL support `bptt`, `ppo`, and `shac` training through one common CLI.
 APG SHALL be treated as folded into the BPTT track and SHALL NOT be exposed as a separate public training command for this platform change.
-PPO SHALL use the MuJoCo Playground-style training chain: registry-loaded environment, `wrap_for_brax_training`, and Brax PPO vectorized trainer. BPTT and SHAC MAY remain on baseline rollout adapters until their dedicated algorithm tasks are completed, but documentation and metrics SHALL identify that status explicitly.
+PPO SHALL use the MuJoCo Playground-style training chain: registry-loaded environment, `wrap_for_brax_training`, and Brax PPO vectorized trainer.
+BPTT SHALL use a real differentiable training backend: vectorized JAX rollout through MJX state, loss accumulation over unroll windows, Optax policy updates, checkpoint/eval/render compatibility, and reward-improvement gates.
+SHAC SHALL use a real `jax_shac` adapter backend: clean dependency imports, no runtime monkey patches, explicit actor/value update configuration, checkpoint/eval/render compatibility, and reward-improvement gates.
+Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for any algorithm.
 
 #### Scenario: Smoke Training Matrix
 - **GIVEN** `scripts/train.py` supports `--env`, `--algo`, and `--smoke`
@@ -65,6 +68,12 @@ PPO SHALL use the MuJoCo Playground-style training chain: registry-loaded enviro
 - **GIVEN** a non-smoke training config for `hover_state`
 - **WHEN** training `bptt`, `ppo`, and `shac` for the configured short-run budget
 - **THEN** each algorithm SHALL improve evaluation reward over the initial policy for at least two fixed seeds
+
+#### Scenario: No Compromise Algorithm Backend
+- **GIVEN** an algorithm CLI reports success for `bptt`, `ppo`, or `shac`
+- **WHEN** inspecting the produced metrics artifact
+- **THEN** it SHALL identify the concrete backend used (`jax_bptt`, `brax_ppo`, or `jax_shac`)
+- **AND** it SHALL NOT use smoke-only rollout metrics as proof of training parity
 
 ### Requirement: Evaluation, Rendering, And mjviser Visualization
 The platform SHALL provide CLI tools for evaluation, offline rendering, and live mjviser inspection.

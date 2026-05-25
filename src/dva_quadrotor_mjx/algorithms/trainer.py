@@ -80,9 +80,9 @@ def train(
 ) -> TrainResult:
     """Runs a trainer with a common algorithm interface.
 
-    ``ppo`` uses the Brax PPO trainer and vectorized training wrappers, matching
-    the MuJoCo Playground training chain.  ``bptt`` and ``shac`` remain light
-    baseline rollouts until their dedicated algorithm work lands.
+    ``ppo`` uses the Brax PPO trainer and vectorized training wrappers.  ``bptt``
+    and ``shac`` must be replaced by real backends before they satisfy the
+    OpenSpec training-parity requirements.
     """
 
     if algo == "ppo":
@@ -121,7 +121,11 @@ def train(
         "episode_length": lengths,
         "mean_reward": float(sum(rewards) / max(len(rewards), 1)),
         "mean_episode_length": float(sum(lengths) / max(len(lengths), 1)),
-        "note": "Smoke/baseline rollout; long-run learning gates are separate OpenSpec tasks.",
+        "backend": "smoke_rollout",
+        "note": (
+            "Diagnostic rollout only. This does not satisfy the OpenSpec "
+            "training-parity backend requirement."
+        ),
     }
     return TrainResult(params=train_state.params, metrics=metrics, train_state=train_state)
 

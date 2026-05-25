@@ -39,15 +39,28 @@
 
 ## 4. Algorithms
 
-- [ ] 4.1 Implement `algorithms/bptt.py` with JAX rollout, policy update, checkpointing, and metrics.
+- [ ] 4.1 Implement `algorithms/bptt.py` as a real `jax_bptt` backend:
+  - vectorized reset/step over `num_envs`
+  - differentiable `lax.scan` unroll through MJX dynamics
+  - trajectory loss over reward/cost terms
+  - `jax.value_and_grad` + Optax policy update
+  - metrics with backend=`jax_bptt`, loss, reward, SPS, compile/train time
+  - checkpoint/eval/render compatibility
 - [x] 4.2 Implement `algorithms/ppo.py` or a clean Brax PPO adapter.
-- [ ] 4.3 Implement `algorithms/shac.py` as clean wrapper around `third_party/jax_shac`, without runtime monkey patches.
+- [ ] 4.3 Implement `algorithms/shac.py` as a real `jax_shac` backend:
+  - clean imports from `third_party/jax_shac`
+  - no runtime monkey patches
+  - explicit actor/value config mapping from CLI/YAML
+  - metrics with backend=`jax_shac`, actor loss, value loss, reward, SPS
+  - checkpoint/eval/render compatibility
 - [x] 4.4 Add common trainer interface:
   - `train(config) -> TrainResult`
   - `eval(checkpoint, env, episodes) -> EvalResult`
   - `make_policy(checkpoint) -> callable`
 - [ ] 4.5 Add save/load parity test based on `rpg_flightning/examples/save_load_policy.ipynb`.
 - [x] 4.6 Fold APG into the BPTT public algorithm track while keeping APG placeholders reserved for `dva-quadrotor-mjx`.
+- [ ] 4.7 Remove fallback smoke/baseline rollout as an accepted training backend for `bptt` and `shac`.
+- [ ] 4.8 Add backend assertion tests: metrics for `bptt`, `ppo`, and `shac` SHALL report `jax_bptt`, `brax_ppo`, and `jax_shac` respectively.
 
 ## 5. CLI Scripts And Configs
 

@@ -80,9 +80,14 @@ train-jax-shac --env_name forest_navigation --smoke
 The console scripts are registered in `pyproject.toml` as `dva_quadrotor_mjx.learning.*:run` entry points, matching the same pattern as MuJoCo Playground's `train-jax-ppo = "learning.train_jax_ppo:run"`.
 APG is folded into the BPTT track, so the public training matrix is `bptt`, `ppo`, and `shac`.
 
-PPO uses the MuJoCo Playground-style chain: `envs.registry.load(...)`, `dva_quadrotor_mjx.wrapper.wrap_for_brax_training`, and Brax PPO's vectorized trainer. BPTT and SHAC still use the current baseline rollout path until their dedicated algorithm tasks are completed.
+PPO uses the MuJoCo Playground-style chain: `envs.registry.load(...)`, `dva_quadrotor_mjx.wrapper.wrap_for_brax_training`, and Brax PPO's vectorized trainer.
 
-Why this is explicit: earlier implementation work only aligned the console-script naming, package entry points, output directories, and smoke checks. It did not use Playground's actual vectorized trainer path, so it was a temporary baseline rollout rather than full training parity. This is now corrected for PPO; BPTT and SHAC remain documented follow-up work instead of being presented as Playground-parity trainers.
+BPTT and SHAC are not allowed to be documented as Playground-parity until their real training backends are implemented. The target design is:
+
+- `bptt`: vectorized JAX rollout through MJX state, differentiable loss over unroll windows, Optax policy update, checkpoint/eval/render compatibility, and a short-run reward-improvement gate.
+- `shac`: clean `third_party/jax_shac` adapter with no runtime monkey patches, explicit actor/value update config, checkpoint/eval/render compatibility, and a short-run reward-improvement gate.
+
+Earlier implementation work only aligned console-script naming, package entry points, output directories, and smoke checks. That was useful as a CLI bootstrap, but it is not accepted as algorithm parity.
 
 Default console runs are intentionally short:
 

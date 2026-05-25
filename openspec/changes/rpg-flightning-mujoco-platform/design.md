@@ -220,9 +220,13 @@ Reference:
 
 Required work:
 
-- JAX rollout through MJX dynamics.
-- Deterministic policy network equivalent to `rpg_flightning` MLP.
-- Stop-gradient strategy documented for sensors.
+- Implement a real `jax_bptt` backend, not a smoke rollout adapter.
+- Use `jax.vmap` over `num_envs` and `jax.lax.scan` over `unroll_length` / episode chunks.
+- Backpropagate through MJX state rollout for state and feature observations where differentiability is available.
+- Use `jax.value_and_grad` and Optax to update the deterministic policy.
+- Save checkpoints in a format accepted by `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor`.
+- Report metrics with `backend="jax_bptt"`, loss, reward, SPS, compile time, and train time.
+- Document and enforce stop-gradient boundaries for rangefinder/RGB/depth observations.
 - Support state hover and feature hover.
 
 Acceptance:
@@ -233,6 +237,7 @@ Acceptance:
 - `scripts/train.py --algo bptt --env gate_crossing --smoke` no error.
 - `scripts/train.py --algo bptt --env forest_navigation --smoke` no error.
 - Full run improves evaluation reward by a configured minimum over initial policy for at least 2 fixed seeds.
+- Metrics artifact includes `backend="jax_bptt"` and does not use smoke-only rollout metrics as a substitute for training.
 
 #### PPO
 
@@ -252,9 +257,9 @@ Required work:
 
 Implementation note:
 
-- The earlier CLI implementation was a smoke/baseline rollout adapter. It matched Playground naming and package entry points, but not the actual Playground training backend.
-- That compromise existed to keep the 3x3 smoke matrix runnable while env semantics and package structure were still moving.
-- This OpenSpec now treats that as insufficient for PPO parity: PPO must run through Brax PPO and the vectorized training wrapper chain. BPTT and SHAC keep explicit pending tasks until their real trainers replace the baseline adapter.
+- Earlier CLI work aligned naming and smoke checks only; that is not an accepted training backend.
+- PPO parity requires Brax PPO plus the vectorized training wrapper chain.
+- BPTT and SHAC parity require their own real backends and backend-identifying metrics; smoke-only rollout artifacts are allowed only as failing diagnostics before implementation is complete.
 
 Acceptance:
 
@@ -274,9 +279,13 @@ Reference:
 
 Required work:
 
+- Implement a real `jax_shac` backend, not a smoke rollout adapter.
 - Move current SHAC integration out of `scripts/train.py` monkey patch path.
 - Vendor or adapt `jax_shac` dependencies cleanly.
+- Map CLI/YAML config to explicit actor/value update settings.
 - Provide stable checkpoint path outside `third_party`.
+- Save checkpoints in a format accepted by `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor`.
+- Report metrics with `backend="jax_shac"`, actor loss, value loss, reward, SPS, compile time, and train time.
 - Add smoke and short-run test modes.
 
 Acceptance:
@@ -286,6 +295,7 @@ Acceptance:
 - `scripts/train.py --algo shac --env gate_crossing --smoke` no error.
 - `scripts/train.py --algo shac --env forest_navigation --smoke` no error.
 - `scripts/eval.py --checkpoint <shac_ckpt> --episodes 4` no error.
+- Metrics artifact includes `backend="jax_shac"` and does not use smoke-only rollout metrics as a substitute for training.
 
 ### Visualization And Inspection
 
@@ -313,6 +323,11 @@ Acceptance:
 
 ## Known Risks
 
+- Documentation scan for compromise designs:
+  - BPTT/SHAC smoke rollout adapters exist only as diagnostics and SHALL NOT count as training backend completion.
+  - DVA/APG placeholders belong to `openspec/changes/dva-quadrotor-mjx` and SHALL NOT be promoted as implemented algorithms in this change.
+  - RGB/depth rendering availability remains an explicit capability check; tests SHALL skip or fail loudly rather than substituting fake zero images.
+  - Scene XML physical collision disablement is accepted only with matching JAX semantic collision tests.
 - MJX/MJWarp rendering is not a dependable differentiable renderer. Use it as observation generation unless a separate differentiable renderer branch is created.
 - SHAC currently depends on ad hoc monkey patches. This must be fixed before claiming production-quality training.
 - `rpg_flightning` feature vision is landmark projection, not RGB/LiDAR. It should be implemented as compatibility mode, not confused with final perception tasks.
