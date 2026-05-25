@@ -2,21 +2,22 @@
 
 ## Current State
 
-当前仓库已经具备可用但不完整的基础：
+当前仓库已经具备可用但不完整的平台骨架：
 
-- 有 `src/dva_quadrotor_mjx/envs/hover.py`，实现了一个 `HoveringStateEnv`。
-- 有 `src/dva_quadrotor_mjx/controllers/low_level.py` 和 `src/dva_quadrotor_mjx/dynamics/drag.py`。
-- 有 `scripts/train.py`，可通过 `PYTHONPATH=src:third_party` 跑 state SHAC demo。
-- 有 `tests/test_dynamics.py`、`tests/test_hover_env.py`、`tests/test_shac.py`、`tests/test_perception.py`。
+- `pyproject.toml` 支持从仓库根目录 editable install，并注册 Playground 风格 console scripts。
+- `envs.registry.load` 已注册 `hover_state`、`hover_features`、`hover_obstacle`、`gate_crossing`、`forest_navigation`。
+- `scripts/train.py` 已设置 JAX/MuJoCo headless 运行环境，并支持 `bptt`、`ppo`、`shac` 统一入口。
+- PPO 已连接 `registry.load`、`wrap_for_brax_training` 和 Brax PPO vectorized trainer。
+- `scripts/eval.py`、`scripts/render.py`、`scripts/visualize_mjviser.py` 已存在基础入口。
+- `delivery-status-and-grill.md` 记录当前交付状态和防妥协验收共识。
 
-但还不能称为完整 `rpg_flightning` MJX 迁移：
+但还不能称为完整 `rpg_flightning` MJX 平台：
 
-- `scripts/eval.py`、`scripts/render.py` 为空。
-- `src/dva_quadrotor_mjx/algorithms/{bptt,ppo,shac,dva}.py` 基本为空或缺少正式封装。
-- `src/dva_quadrotor_mjx/envs/{obstacle_avoidance,ring_navigation,forest_navigation}.py` 为空。
-- `src/dva_quadrotor_mjx/envs/sensors/{camera,lidar,raycasting}.py` 为空。
-- `test_perception.py` 允许 renderer fallback 为零图，不能证明真实渲染。
-- `scripts/train.py` 使用 `brax.v1`、`jaxtyping`、`typeguard` monkey patch，不是干净依赖集成。
+- `bptt` 仍需真实 `jax_bptt` backend，不能由 smoke rollout 代替。
+- `shac` 仍需真实 `jax_shac` backend，不能由 smoke rollout 代替。
+- 三场景的 deterministic reset、success/failure、sensor geometry tests 仍未形成完整验收闭环。
+- acceptance runner 仍未实现；reward-improvement gate 还没有机器可执行入口。
+- mjviser 三场景命令仍未作为最终验收完成验证。
 
 ## Architecture Target
 
@@ -74,6 +75,227 @@ scripts/
   render.py
   visualize_mjviser.py
 ```
+
+### System Architecture
+
+```mermaid
+graph TD
+    CLI["Console scripts\ntrain-jax-bptt / train-jax-ppo / train-jax-shac / play-dva-quadrotor"]
+    Train["scripts/train.py\ncommon training CLI"]
+    Eval["scripts/eval.py"]
+    Render["scripts/render.py"]
+    Play["scripts/visualize_mjviser.py"]
+    Gate["Acceptance gate runner\nmetrics + thresholds + pass/fail"]
+
+    Registry["envs.registry.load\nEnvSpec + env factory"]
+    Env["MJX task envs\nhover_state / hover_features / hover_obstacle / gate_crossing / forest_navigation"]
+    Dynamics["quadrotor dynamics\nmotor delay + drag + low-level control"]
+    Sensors["sensors\nfeature camera / rangefinder / RGB-depth capability checks"]
+
+    BPTT["jax_bptt backend"]
+    PPO["brax_ppo backend\nwrap_for_brax_training"]
+    SHAC["jax_shac backend"]
+    Checkpoint["artifacts checkpoints\nbackend-specific save/load"]
+    Metrics["metrics JSON\nbackend, seeds, baselines, thresholds"]
+    Viewer["mjviser headless viewer"]
+
+    CLI --> Train
+    CLI --> Play
+    Train --> Registry
+    Eval --> Registry
+    Render --> Registry
+    Play --> Registry
+    Registry --> Env
+    Env --> Dynamics
+    Env --> Sensors
+    Train --> BPTT
+    Train --> PPO
+    Train --> SHAC
+    BPTT --> Checkpoint
+    PPO --> Checkpoint
+    SHAC --> Checkpoint
+    BPTT --> Metrics
+    PPO --> Metrics
+    SHAC --> Metrics
+    Gate --> Train
+    Gate --> Eval
+    Gate --> Metrics
+    Eval --> Checkpoint
+    Render --> Checkpoint
+    Play --> Checkpoint
+    Play --> Viewer
+```
+
+### Non-Functional Requirements
+
+- Reproducibility: acceptance runs must record training seeds, evaluation seeds,
+  backend name, config path, thresholds, checkpoint path, and pass/fail result.
+- Headless operation: all train/eval/render/play commands must work on the
+  remote server with `MUJOCO_GL=egl` or fail with a documented capability error.
+- Import hygiene: commands must run from the repository root after editable
+  install without manual `PYTHONPATH`.
+- Differentiability honesty: state and feature observations can participate in
+  differentiable training; rangefinder/RGB/depth boundaries must be explicit
+  stop-gradient or non-differentiable observation paths.
+- Artifact isolation: generated checkpoints, metrics, videos, and frame
+  sequences must live under `artifacts/` or a configured output directory, never
+  under `third_party/`.
+- Operational debuggability: every user-facing train command must have matching
+  eval, render, and mjviser play paths for the produced checkpoint.
+
+### Component Boundaries
+
+- `envs/` owns task semantics, MJCF selection, reset determinism, observations,
+  rewards, done flags, and scene metrics.
+- `dynamics/` and `controllers/` own physical stepping, motor delay, drag, and
+  low-level control. Task envs should not duplicate these mechanics.
+- `sensors/` owns feature projection, rangefinder geometry validation, and
+  rendering capability checks. It must not silently synthesize fake RGB/depth
+  success.
+- `wrappers/` owns action normalization, logging, vectorization, and Brax
+  training compatibility.
+- `algorithms/` owns backend-specific training loops and checkpoint formats.
+  Smoke rollout belongs to diagnostics and must not be exposed as a backend.
+- `scripts/` owns CLI translation, config loading, output directories, and
+  user-facing commands. It must not contain algorithm logic beyond dispatch.
+- `acceptance` runner owns the reward-improvement matrix and produces the final
+  delivery evidence.
+
+## Architecture Decision Records
+
+### ADR-001: Independent Package With Playground-Style Interfaces
+
+Status: Accepted
+
+Context:
+
+The project must migrate `rpg_flightning` semantics while remaining usable with
+MuJoCo MJX, Brax PPO, jax_shac, and mjviser. Directly embedding inside
+`third_party/mujoco_playground` would make local research changes hard to review
+and would mix upstream code with experiment-specific algorithms.
+
+Decision:
+
+Keep `dva_quadrotor_mjx` as an independent package, but mirror Playground
+interfaces where they are operationally useful: console scripts, environment
+registry, `wrap_for_brax_training`, artifact layout, and headless runtime
+environment setup.
+
+Consequences:
+
+- Positive: local algorithm and DVA work can evolve without forking Playground.
+- Positive: users get familiar Playground-style train/play commands.
+- Negative: adapters must be maintained when Brax/Playground APIs change.
+- Neutral: compatibility is defined by tests and OpenSpec, not by package
+  location.
+
+Alternatives considered:
+
+- Put the project directly inside `third_party/mujoco_playground`: rejected
+  because it couples research code to vendored upstream layout.
+- Directly port `rpg_flightning` package structure: rejected because MuJoCo MJX
+  and Brax trainers need different runtime boundaries.
+
+### ADR-002: Backend Plugin Contract Instead Of One Generic Trainer
+
+Status: Accepted
+
+Context:
+
+`bptt`, `ppo`, and `shac` have different training semantics. PPO is naturally
+served by Brax PPO and `wrap_for_brax_training`. BPTT needs differentiable
+rollouts and Optax updates. SHAC needs a clean `jax_shac` adapter. A single
+lowest-common-denominator trainer caused earlier smoke rollout behavior to look
+like algorithm completion.
+
+Decision:
+
+Expose one CLI and one result schema, but implement each algorithm as a concrete
+backend plugin with backend-identifying metrics:
+
+- `bptt` -> `jax_bptt`
+- `ppo` -> `brax_ppo`
+- `shac` -> `jax_shac`
+
+The common layer may dispatch, load config, write artifacts, and normalize
+result fields. It must not hide smoke rollout behind an algorithm name.
+
+Consequences:
+
+- Positive: backend-specific correctness can be tested directly.
+- Positive: metrics reveal what actually ran.
+- Negative: checkpoint loaders need backend-specific branches.
+- Negative: acceptance matrix is larger because every backend must prove itself.
+
+Alternatives considered:
+
+- Continue using one smoke/baseline rollout path for all algorithms: rejected
+  because it cannot prove learning backend parity.
+- Copy all third-party trainers into one local trainer: rejected because it
+  increases maintenance and obscures reference behavior.
+
+### ADR-003: Acceptance Gate As A First-Class Architecture Component
+
+Status: Accepted
+
+Context:
+
+The project has two kinds of success that must not be confused: command wiring
+and learning behavior. Smoke commands validate wiring. Delivery requires
+reward improvement, scene-specific non-random behavior, reloadable checkpoints,
+and visualization/evaluation usability.
+
+Decision:
+
+Implement an acceptance runner as a first-class component. It evaluates initial
+policy and random-policy baselines, runs non-smoke training for the configured
+budget, reloads the checkpoint, evaluates with fixed seeds, checks reward and
+scene thresholds, and writes pass/fail evidence.
+
+Consequences:
+
+- Positive: delivery claims become auditable.
+- Positive: agents cannot lower standards by citing a successful smoke run.
+- Negative: acceptance runs are slower than smoke tests.
+- Negative: thresholds must be calibrated and versioned with configs.
+
+Alternatives considered:
+
+- Manual inspection of metrics: rejected because it is not reproducible.
+- One global mean-reward threshold: rejected because scene metrics differ.
+
+### ADR-004: Semantic JAX Collisions For Scene Rewards
+
+Status: Accepted
+
+Context:
+
+MJX scene XML collision support can reject some collision combinations or make
+physics contact behavior hard to differentiate from task semantics. The project
+already uses scene geometry primarily for visualization and range queries, while
+task rewards need deterministic, JAX-checkable collision/clearance semantics.
+
+Decision:
+
+Use MJCF geometry for visualization and supported sensor/raycast interactions.
+Use explicit JAX semantic collision and clearance checks inside env logic for
+task reward, termination, and acceptance tests.
+
+Consequences:
+
+- Positive: task semantics are deterministic and testable under JAX.
+- Positive: XML collision limitations do not block scene development.
+- Negative: physics contacts and semantic collision logic can drift if tests are
+  weak.
+- Neutral: acceptance must include controlled collision/clearance tests for each
+  scene.
+
+Alternatives considered:
+
+- Use MuJoCo physical contacts for all task semantics: rejected for current MJX
+  compatibility and controllability risks.
+- Disable collision semantics entirely: rejected because scene tasks would not
+  prove obstacle navigation behavior.
 
 ### Environment Semantics
 
