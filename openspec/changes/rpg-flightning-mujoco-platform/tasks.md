@@ -47,8 +47,8 @@
   - metrics with backend=`jax_bptt`, loss, reward, SPS, compile/train time
   - checkpoint/eval/render compatibility
 - [x] 4.2 Implement `algorithms/ppo.py` or a clean Brax PPO adapter.
-- [ ] 4.3 Implement `algorithms/shac.py` as a real `jax_shac` backend:
-  - clean imports from `third_party/jax_shac`
+- [ ] 4.3 Implement `src/dva_quadrotor_mjx/algorithms/shac.py` as a project-owned backend adapted from `third_party/jax_shac`:
+  - reference `third_party/jax_shac/shac/train.py` for algorithm semantics
   - no runtime monkey patches
   - explicit actor/value config mapping from CLI/YAML
   - metrics with backend=`jax_shac`, actor loss, value loss, reward, SPS

@@ -204,7 +204,8 @@ Context:
 
 `bptt`, `ppo`, and `shac` have different training semantics. PPO is naturally
 served by Brax PPO and `wrap_for_brax_training`. BPTT needs differentiable
-rollouts and Optax updates. SHAC needs a clean `jax_shac` adapter. A single
+rollouts and Optax updates. SHAC needs a project-owned adapted backend derived
+from `jax_shac`. A single
 lowest-common-denominator trainer caused earlier smoke rollout behavior to look
 like algorithm completion.
 
@@ -583,9 +584,12 @@ Reference:
 
 Required work:
 
-- Implement a real `jax_shac` backend, not a smoke rollout adapter.
+- Implement a real `jax_shac`-semantics backend in
+  `src/dva_quadrotor_mjx/algorithms/shac.py`, not a smoke rollout adapter.
 - Move current SHAC integration out of `scripts/train.py` monkey patch path.
-- Vendor or adapt `jax_shac` dependencies cleanly.
+- Copy/adapt the required `third_party/jax_shac` algorithm pieces into the local
+  backend boundary, with comments or README references for substantial derived
+  sections.
 - Map CLI/YAML config to explicit actor/value update settings.
 - Provide stable checkpoint path outside `third_party`.
 - Save checkpoints in a format accepted by `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor`.

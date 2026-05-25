@@ -180,9 +180,39 @@ Spec updates:
 - `tasks.md` now includes `hover_features + bptt` in the non-smoke learning
   gates.
 
+### Decision 5: SHAC Backend Ownership
+
+Status: accepted
+
+Question:
+
+Should `SHAC` be required to use `third_party/jax_shac` directly, or may it
+copy/adapt the algorithm into `src/dva_quadrotor_mjx/algorithms/shac.py`?
+
+Decision:
+
+`SHAC` SHALL be implemented as an adapted backend inside
+`src/dva_quadrotor_mjx/algorithms/shac.py`, using `third_party/jax_shac` as the
+reference implementation rather than as the direct runtime entry point. The
+adapted backend must preserve the algorithm semantics needed for this platform:
+short-horizon actor update, value/critic update, explicit actor/value config,
+checkpoint/eval/render/play compatibility, backend-identifying metrics, and the
+reward-improvement gates. It must remove `third_party/jax_shac` assumptions that
+conflict with this package boundary, including manual `PYTHONPATH`, runtime
+monkey patches, output paths outside `artifacts/`, or hidden notebook-only
+entry points.
+
+Spec updates:
+
+- `README.md` now references `third_party/jax_shac/shac/train.py` as the SHAC
+  reference implementation and states that the project-owned backend lives in
+  `src/dva_quadrotor_mjx/algorithms/shac.py`.
+- `design.md` now states that SHAC is a project-owned adapted backend derived
+  from `third_party/jax_shac`.
+- `tasks.md` now requires the adapted backend to live in
+  `src/dva_quadrotor_mjx/algorithms/shac.py`.
+
 ## Open Grill Questions
 
-- Should `SHAC` be required to use `third_party/jax_shac` directly, or may it
-  copy/adapt the algorithm into `src/dva_quadrotor_mjx/algorithms/shac.py`?
 - Should render/video acceptance require ffmpeg-backed `.mp4`, or is a non-empty
   `.npz` frame sequence acceptable on headless machines?

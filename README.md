@@ -85,7 +85,7 @@ PPO uses the MuJoCo Playground-style chain: `envs.registry.load(...)`, `dva_quad
 BPTT and SHAC are not allowed to be documented as Playground-parity until their real training backends are implemented. The target design is:
 
 - `bptt`: vectorized JAX rollout through MJX state, differentiable loss over unroll windows, Optax policy update, checkpoint/eval/render compatibility, and a short-run reward-improvement gate.
-- `shac`: clean `third_party/jax_shac` adapter with no runtime monkey patches, explicit actor/value update config, checkpoint/eval/render compatibility, and a short-run reward-improvement gate.
+- `shac`: an adapted implementation in `src/dva_quadrotor_mjx/algorithms/shac.py`, based on `third_party/jax_shac/shac/train.py`, with no runtime monkey patches, explicit actor/value update config, checkpoint/eval/render compatibility, and a short-run reward-improvement gate.
 
 Earlier implementation work only aligned console-script naming, package entry points, output directories, and smoke checks. That was useful as a CLI bootstrap, but it is not accepted as algorithm parity.
 
@@ -171,4 +171,5 @@ Algorithm configs: `src/dva_quadrotor_mjx/configs/algorithms/*.yaml`
 
 - Original implementation: `third_party/rpg_flightning/`
 - MuJoCo Playground: `third_party/mujoco_playground/`
-- jax_shac: `third_party/jax_shac/`
+- SHAC reference implementation: `third_party/jax_shac/shac/train.py`
+- SHAC MJX environment references: `third_party/jax_shac/envs/mjx_envs.py`, `third_party/jax_shac/envs/register_framed_hopper.py`
