@@ -297,6 +297,62 @@ Alternatives considered:
 - Disable collision semantics entirely: rejected because scene tasks would not
   prove obstacle navigation behavior.
 
+References:
+
+- `third_party/rpg_flightning/flightning/envs/hovering_state_env.py:183-236`
+  computes reward and termination from JAX state and `WorldBox.contains`, not
+  from simulator contact buffers.
+- `third_party/rpg_flightning/flightning/objects/world_box_obj.py:21-25`
+  defines collision as a JAX boolean geometry predicate.
+- `third_party/mujoco/doc/mjx.rst:128-130` says MJX contact storage differs
+  between JAX and Warp and recommends reading contacts through contact sensors.
+- `third_party/mujoco/doc/mjx.rst:466-525` documents MJX geom/contact feature
+  gaps, including unsupported collision combinations.
+- `third_party/mujoco/doc/mjx.rst:561-587` recommends explicit contact-pair and
+  contact-buffer tuning for MJX-JAX performance.
+- `third_party/mujoco_playground/mujoco_playground/_src/dm_control_suite/xmls/README.md:1-46`
+  documents Playground XML changes for XPU performance, including disabled
+  contacts and tuned `max_contact_points` / `max_geom_pairs`.
+
+### Alignment Contract
+
+When this project says "aligned with rpg_flightning", it means:
+
+- Preserve task semantics: reset distribution, observation schema, action
+  schema, delay/action history, reward terms, termination semantics, rollout
+  shape, and policy save/load behavior.
+- Preserve feature-vision semantics: `hover_features` uses projected landmarks
+  from the double-sphere camera model, not RGB pixels.
+- Preserve differentiability intent: BPTT uses differentiable JAX rollout for
+  state/feature observations and documents stop-gradient boundaries for sensors
+  that are not differentiable.
+- Preserve verification style: fixed-seed numeric/semantic parity tests compare
+  shared quantities with documented tolerances.
+
+When this project says "aligned with mujoco_playground", it means:
+
+- Preserve operational shape: package entry points, headless runtime defaults,
+  registry-based env construction, config-driven CLI, `artifacts/` outputs, and
+  reproducible training/eval/render/play commands.
+- Preserve training integration style: PPO uses
+  `registry.load -> wrap_for_brax_training -> Brax PPO trainer`; other
+  algorithms expose the same user-facing CLI shape while using their own real
+  backends.
+- Preserve env API style: reset/step return a JAX-compatible `State` with
+  pipeline data, observations, reward, done, metrics, and info.
+- Preserve visualization/debug path: mjviser and offline render commands inspect
+  the same MJCF scene assets used by training.
+
+Alignment does not mean:
+
+- Copying `rpg_flightning` source structure verbatim.
+- Putting local code inside `third_party/mujoco_playground`.
+- Treating smoke rollout as algorithm parity.
+- Treating MJCF physical contacts as the sole source of scene reward or
+  termination unless a specific task explicitly chooses that and supplies tests.
+- Treating RGB/depth rendering as differentiable unless a documented renderer
+  backend proves that property.
+
 ### Environment Semantics
 
 #### Base Env
