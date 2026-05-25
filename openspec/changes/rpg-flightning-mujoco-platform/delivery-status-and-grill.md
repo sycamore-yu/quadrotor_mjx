@@ -147,10 +147,35 @@ primary metric meets the configured threshold. The metrics artifact must record
 the seeds, thresholds, baseline metrics, final metrics, checkpoint path, and
 pass/fail result.
 
+### Decision 4: BPTT Feature Scope
+
+Status: accepted
+
+Question:
+
+Should `BPTT` target state and feature observations in the same milestone, or
+state first and feature second?
+
+Decision:
+
+`BPTT` must target state and feature observations in the same milestone. In this
+change, `hover_features` means `rpg_flightning`-style projected landmark
+features plus action history, not RGB/depth rendering. Therefore feature BPTT is
+part of the `rpg-flightning-mujoco-platform` milestone and must not be split out
+as a rendering task. Real RGB/depth rendered perception remains separate from
+feature-observation parity and must keep explicit capability checks.
+
+Spec updates:
+
+- `CONTEXT.md` defines `Feature Observation` separately from rendered RGB/depth
+  observations.
+- `design.md` already states that `hover_features` uses projected landmarks,
+  not RGB pixels.
+- `spec.md` already requires `hover_features` observations to be projected
+  landmark coordinates, not RGB pixels.
+
 ## Open Grill Questions
 
-- Should `BPTT` target state and feature observations in the same milestone, or
-  state first and feature second?
 - Should `SHAC` be required to use `third_party/jax_shac` directly, or may it
   copy/adapt the algorithm into `src/dva_quadrotor_mjx/algorithms/shac.py`?
 - Should render/video acceptance require ffmpeg-backed `.mp4`, or is a non-empty

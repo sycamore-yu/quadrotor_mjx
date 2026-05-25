@@ -34,7 +34,7 @@ Thumbs.db
 #third_party/
 
 # openspec design docs (managed separately)
-openspec/
+#openspec/
 
 # External deps downloaded by mujoco_playground
 mujoco_playground/external_deps/

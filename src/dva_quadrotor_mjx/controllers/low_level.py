@@ -1,35 +1,32 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 class LowLevelController:
     """Low-level P-controller for quadrotor angular rate tracking."""
 
     def __init__(
         self,
-        inertia: jax.Array = jnp.array([0.0023, 0.0023, 0.0040]),
-        k_p: jax.Array = jnp.array([20.0, 20.0, 41.0]),
+        inertia: jax.Array | None = None,
+        k_p: jax.Array | None = None,
         ctrl_min: float = 0.0,
         ctrl_max: float = 3.0,
     ):
-        self.J = inertia
-        self.K_p = k_p
+        self.J = jnp.asarray([0.0023, 0.0023, 0.0040] if inertia is None else inertia)
+        self.K_p = jnp.asarray([20.0, 20.0, 41.0] if k_p is None else k_p)
         self.ctrl_min = ctrl_min
         self.ctrl_max = ctrl_max
 
         # Construct allocation matrix
         # Rotor order: fl (rotor_fl), fr (rotor_fr), rl (rotor_rl), rr (rotor_rr)
         # Coordinates and yaw direction (kappa) from quadrotor_hover.xml
-        x = jnp.array([0.13, 0.13, -0.13, -0.13])
-        y = jnp.array([0.13, -0.13, 0.13, -0.13])
-        kappa = jnp.array([0.008, -0.008, -0.008, 0.008])
+        x = np.array([0.13, 0.13, -0.13, -0.13], dtype=np.float32)
+        y = np.array([0.13, -0.13, 0.13, -0.13], dtype=np.float32)
+        kappa = np.array([0.008, -0.008, -0.008, 0.008], dtype=np.float32)
 
-        self.A = jnp.stack([
-            jnp.ones(4),
-            y,
-            -x,
-            kappa
-        ])
-        self.A_inv = jnp.linalg.inv(self.A)
+        allocation = np.stack([np.ones(4, dtype=np.float32), y, -x, kappa])
+        self.A = jnp.asarray(allocation)
+        self.A_inv = jnp.asarray(np.linalg.inv(allocation))
 
     def compute_ctrl(self, omega: jax.Array, omega_cmd: jax.Array, f_T: jax.Array) -> jax.Array:
         """Computes low level motor controls.
