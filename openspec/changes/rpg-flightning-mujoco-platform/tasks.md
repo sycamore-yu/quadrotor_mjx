@@ -104,6 +104,7 @@ Every command below must run without errors in smoke mode:
 Full training gates:
 
 - [ ] 6.14 `hover_state + bptt` improves eval reward over initial policy for 2 seeds.
+- [ ] 6.14a `hover_features + bptt` improves eval reward over initial policy for 2 seeds using projected landmark observations, not rendered RGB/depth.
 - [ ] 6.15 `hover_state + ppo` improves eval reward over initial policy for 2 seeds.
 - [ ] 6.16 `hover_state + shac` improves eval reward over initial policy for 2 seeds.
 - [ ] 6.17 `hover_obstacle + bptt` beats random-policy baseline on target-distance and collision/clearance metrics.

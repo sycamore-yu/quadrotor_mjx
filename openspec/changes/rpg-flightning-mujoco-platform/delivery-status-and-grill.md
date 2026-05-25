@@ -53,7 +53,8 @@ mistaken for completed work.
   incomplete.
 - Full learning gates are not complete:
   all `bptt`, `ppo`, and `shac` combinations across `hover_state`,
-  `hover_obstacle`, `gate_crossing`, and `forest_navigation`.
+  `hover_obstacle`, `gate_crossing`, and `forest_navigation`, plus
+  `hover_features + bptt`.
 - Three mjviser scene commands are not yet verified as final acceptance.
 
 ## Delivery Gates
@@ -68,6 +69,7 @@ The change is not ready to archive until all gates below pass:
   - PPO metrics report `backend="brax_ppo"`
   - SHAC metrics report `backend="jax_shac"`
 - Full learning gates from `tasks.md` section 6.14 to 6.26
+- The feature-observation BPTT gate from `tasks.md` section 6.14a
 - mjviser visualization gates from `tasks.md` section 7.1 to 7.5
 - No metric artifact with `backend="smoke_rollout"` may be used as evidence of
   training parity.
@@ -161,9 +163,10 @@ Decision:
 `BPTT` must target state and feature observations in the same milestone. In this
 change, `hover_features` means `rpg_flightning`-style projected landmark
 features plus action history, not RGB/depth rendering. Therefore feature BPTT is
-part of the `rpg-flightning-mujoco-platform` milestone and must not be split out
-as a rendering task. Real RGB/depth rendered perception remains separate from
-feature-observation parity and must keep explicit capability checks.
+part of the `rpg-flightning-mujoco-platform` milestone and must pass a non-smoke
+reward-improvement gate. It must not be split out as a rendering task. Real
+RGB/depth rendered perception remains separate from feature-observation parity
+and must keep explicit capability checks.
 
 Spec updates:
 
@@ -172,7 +175,10 @@ Spec updates:
 - `design.md` already states that `hover_features` uses projected landmarks,
   not RGB pixels.
 - `spec.md` already requires `hover_features` observations to be projected
-  landmark coordinates, not RGB pixels.
+  landmark coordinates, not RGB pixels, and now includes the feature BPTT
+  learning gate.
+- `tasks.md` now includes `hover_features + bptt` in the non-smoke learning
+  gates.
 
 ## Open Grill Questions
 

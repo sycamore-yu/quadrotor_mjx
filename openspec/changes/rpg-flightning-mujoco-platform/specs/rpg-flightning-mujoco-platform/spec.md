@@ -29,6 +29,13 @@ The platform SHALL provide both state-based hover and `rpg_flightning` feature-v
 - **THEN** the command SHALL finish without error
 - **AND** feature observations SHALL be projected landmark coordinates, not RGB pixels
 
+#### Scenario: Hover Feature BPTT Learning
+- **GIVEN** `hover_features` uses projected landmark coordinates and action history
+- **WHEN** running non-smoke `bptt` training for the configured acceptance budget
+- **THEN** the run SHALL write metrics with `backend="jax_bptt"`
+- **AND** it SHALL improve evaluation reward over the initial policy for two fixed training seeds
+- **AND** the evidence SHALL NOT depend on RGB/depth rendering availability
+
 ### Requirement: Three MJX Scene Tasks
 The platform SHALL provide three scene tasks: `hover_obstacle`, `gate_crossing`, and `forest_navigation`.
 
@@ -65,9 +72,10 @@ Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for a
 - **AND** each run SHALL write metrics and a checkpoint or explicit smoke artifact
 
 #### Scenario: Baseline Learning Signal
-- **GIVEN** a non-smoke training config for each acceptance env (`hover_state`, `hover_obstacle`, `gate_crossing`, and `forest_navigation`)
+- **GIVEN** a non-smoke training config for each acceptance env (`hover_state`, `hover_obstacle`, `gate_crossing`, and `forest_navigation`) and for `hover_features + bptt`
 - **WHEN** training `bptt`, `ppo`, and `shac` for the configured acceptance budget
 - **THEN** every algorithm-env pair SHALL improve evaluation reward over the initial policy for two fixed training seeds
+- **AND** `hover_features + bptt` SHALL improve evaluation reward over the initial policy for two fixed training seeds
 - **AND** every scene algorithm-env pair SHALL beat its random-policy baseline on the scene primary metric
 
 #### Scenario: Reward Improvement Gate Calculation
