@@ -210,6 +210,13 @@ Acceptance:
 
 ### Three Algorithms
 
+Backend completion has one shared contract for all algorithms. A backend is not
+complete because its CLI starts or because smoke rollout writes metrics. It is
+complete only when non-smoke training writes backend-identifying metrics,
+produces a reloadable checkpoint, works through eval/render/mjviser play, and
+passes the short-run reward-improvement gate. This prevents "pending real
+trainer" from being treated as Playground parity.
+
 #### BPTT
 
 Reference:

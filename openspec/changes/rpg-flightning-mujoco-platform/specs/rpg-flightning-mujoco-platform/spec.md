@@ -75,6 +75,15 @@ Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for a
 - **THEN** it SHALL identify the concrete backend used (`jax_bptt`, `brax_ppo`, or `jax_shac`)
 - **AND** it SHALL NOT use smoke-only rollout metrics as proof of training parity
 
+#### Scenario: Backend Completion Contract
+- **GIVEN** an algorithm is claimed complete for this change
+- **WHEN** running its non-smoke training command on `hover_state`
+- **THEN** the command SHALL write metrics with the concrete backend name
+- **AND** it SHALL write a reloadable checkpoint
+- **AND** the checkpoint SHALL work with `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor`
+- **AND** the run SHALL pass the configured short-run reward-improvement gate
+- **AND** a smoke-only CLI run SHALL NOT satisfy backend completion
+
 ### Requirement: Evaluation, Rendering, And mjviser Visualization
 The platform SHALL provide CLI tools for evaluation, offline rendering, and live mjviser inspection.
 

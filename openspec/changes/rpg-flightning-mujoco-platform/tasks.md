@@ -61,6 +61,10 @@
 - [x] 4.6 Fold APG into the BPTT public algorithm track while keeping APG placeholders reserved for `dva-quadrotor-mjx`.
 - [ ] 4.7 Remove fallback smoke/baseline rollout as an accepted training backend for `bptt` and `shac`.
 - [ ] 4.8 Add backend assertion tests: metrics for `bptt`, `ppo`, and `shac` SHALL report `jax_bptt`, `brax_ppo`, and `jax_shac` respectively.
+- [ ] 4.9 Add backend completion contract tests for each claimed-complete backend:
+  non-smoke training writes concrete backend metrics, writes a reloadable
+  checkpoint, works with `eval.py`, `render.py`, and `play-dva-quadrotor`, and
+  passes the short-run reward-improvement gate.
 
 ## 5. CLI Scripts And Configs
 
@@ -119,3 +123,5 @@ Full training gates:
 - [x] 8.3 All smoke train commands in section 6 pass.
 - [ ] 8.4 Three scene visualization commands in section 7 pass.
 - [x] 8.5 Final README section documents exact train/eval/render commands.
+- [ ] 8.6 `delivery-status-and-grill.md` has no open blocking grill decision for
+  any acceptance item being claimed complete.
