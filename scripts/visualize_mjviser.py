@@ -17,12 +17,6 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 import jax
 import mujoco
 import numpy as np
-import viser
-try:
-    from mjviser import Viewer
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party" / "mjviser" / "src"))
-    from mjviser import Viewer
 
 from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
 from dva_quadrotor_mjx.envs.registry import load
@@ -40,6 +34,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument(
+        "--dry-run",
+        "--check-scene",
+        action="store_true",
+        dest="dry_run",
+        help="Construct the scene and policy path without starting a viser server.",
+    )
     args = parser.parse_args(argv)
 
     env = NormalizeActionWrapper(load(args.env))
@@ -90,6 +91,20 @@ def main(argv: list[str] | None = None) -> int:
         copy_state_to_mujoco()
 
     copy_state_to_mujoco()
+    if args.dry_run:
+        print(
+            f"Scene check passed: env={args.env} mode={args.mode} "
+            f"nq={model.nq} nv={model.nv} steps={args.steps}"
+        )
+        return 0
+
+    import viser
+    try:
+        from mjviser import Viewer
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party" / "mjviser" / "src"))
+        from mjviser import Viewer
+
     server = viser.ViserServer(port=args.port)
     print(f"mjviser URL: http://localhost:{args.port}")
     print("Use SSH port forwarding from the headless server if needed.")

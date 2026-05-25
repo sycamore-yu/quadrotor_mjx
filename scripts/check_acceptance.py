@@ -1,0 +1,667 @@
+"""Acceptance gate runner for OpenSpec rpg-flightning-mujoco-platform."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import replace
+from pathlib import Path
+from typing import Any, Callable, Mapping
+
+from dva_quadrotor_mjx.configs.acceptance import (
+    AcceptanceConfig,
+    AcceptanceThresholds,
+    _threshold_is_weaker,
+    apply_threshold_overrides,
+    expected_backend_for_algo,
+    load_acceptance_config,
+)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run or validate an acceptance gate")
+    parser.add_argument("--config", required=True, help="YAML acceptance config")
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="Directory for acceptance artifacts. Defaults to config.output_dir.",
+    )
+    parser.add_argument(
+        "--min-reward-delta",
+        type=float,
+        help="Higher-only override for min_reward_delta.",
+    )
+    parser.add_argument(
+        "--primary-metric-threshold",
+        type=float,
+        help="Higher-only override for the primary metric threshold.",
+    )
+    parser.add_argument(
+        "--primary-metric-vs-random-delta",
+        type=float,
+        help="Higher-only override for the delta vs random baseline.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write a plan artifact without training or evaluation.",
+    )
+    parser.add_argument(
+        "--validate-artifact",
+        type=str,
+        help="Validate an existing acceptance artifact without training.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    config = load_acceptance_config(args.config)
+    thresholds = apply_threshold_overrides(
+        config.thresholds,
+        min_reward_delta=args.min_reward_delta,
+        primary_metric_threshold=args.primary_metric_threshold,
+        primary_metric_vs_random_delta=args.primary_metric_vs_random_delta,
+    )
+    config = replace(config, thresholds=thresholds)
+
+    output_dir = Path(args.output_dir or config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.validate_artifact:
+        artifact = json.loads(Path(args.validate_artifact).read_text())
+        validate_acceptance_artifact(artifact, config, thresholds)
+        print(f"Validated acceptance artifact: {args.validate_artifact}")
+        return 0
+
+    if args.dry_run:
+        plan = build_dry_run_artifact(config, thresholds, output_dir)
+        plan_path = output_dir / f"{config.env}_{config.algo}_acceptance_plan.json"
+        plan_path.write_text(json.dumps(_jsonable(plan), indent=2, sort_keys=True))
+        print(f"Dry-run plan written to: {plan_path}")
+        return 0
+
+    artifact = run_acceptance(config, thresholds=thresholds, output_dir=output_dir)
+    artifact_path = output_dir / f"{config.env}_{config.algo}_acceptance.json"
+    artifact_path.write_text(json.dumps(_jsonable(artifact), indent=2, sort_keys=True))
+
+    print(f"Acceptance artifact: {artifact_path}")
+    print(f"Pass: {artifact['pass']}")
+    return 0 if artifact["pass"] else 1
+
+
+def run_acceptance(
+    config: AcceptanceConfig,
+    *,
+    thresholds: AcceptanceThresholds | None = None,
+    output_dir: Path | None = None,
+    train_fn: Callable[..., Any] | None = None,
+    create_train_state_fn: Callable[..., Any] | None = None,
+    make_network_fn: Callable[..., Any] | None = None,
+    save_checkpoint_fn: Callable[..., Any] | None = None,
+    load_checkpoint_fn: Callable[..., Any] | None = None,
+    load_ppo_policy_fn: Callable[..., Any] | None = None,
+    load_env_fn: Callable[..., Any] | None = None,
+    wrap_env_fn: Callable[..., Any] | None = None,
+    eval_fn: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Runs the acceptance gate and returns a JSON-serialisable artifact."""
+
+    from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint, save_checkpoint, train
+    from dva_quadrotor_mjx.envs.registry import load
+    from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+    from dva_quadrotor_mjx.policies import create_train_state, make_network, select_action
+    from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
+
+    thresholds = thresholds or config.thresholds
+    output_dir = Path(output_dir or config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    train_fn = train_fn or train
+    create_train_state_fn = create_train_state_fn or create_train_state
+    make_network_fn = make_network_fn or make_network
+    save_checkpoint_fn = save_checkpoint_fn or save_checkpoint
+    load_checkpoint_fn = load_checkpoint_fn or load_checkpoint
+    load_ppo_policy_fn = load_ppo_policy_fn or load_ppo_policy
+    load_env_fn = load_env_fn or load
+    wrap_env_fn = wrap_env_fn or NormalizeActionWrapper
+    eval_fn = eval_fn or _evaluate_policy_on_seeds
+
+    expected_backend = config.expected_backend or expected_backend_for_algo(config.algo)
+    runs: list[dict[str, Any]] = []
+
+    for train_seed in config.train_seeds:
+        run_dir = output_dir / f"seed_{train_seed}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        env = wrap_env_fn(load_env_fn(config.env))
+        network = make_network_fn(config.algo, env.action_space.shape[0])
+        template_state = create_train_state_fn(
+            network,
+            env.observation_size,
+            seed=train_seed,
+            learning_rate=config.learning_rate,
+        )
+
+        initial_metrics = eval_fn(
+            env,
+            _deterministic_policy(template_state, select_action),
+            config.eval_seeds,
+            episodes=config.eval_episodes,
+            steps=_resolve_eval_steps(config, env),
+            primary_metric_name=thresholds.primary_metric_name,
+        )
+        random_metrics = eval_fn(
+            env,
+            _random_policy(env.action_space.shape[0]),
+            config.eval_seeds,
+            episodes=config.eval_episodes,
+            steps=_resolve_eval_steps(config, env),
+            primary_metric_name=thresholds.primary_metric_name,
+        )
+
+        train_kwargs = dict(config.train_kwargs or {})
+        if config.algo == "ppo":
+            train_kwargs.setdefault("checkpoint_dir", str(run_dir / "checkpoints"))
+        result = train_fn(
+            env,
+            algo=config.algo,
+            network=network,
+            num_epochs=config.num_epochs,
+            num_steps_per_epoch=config.num_steps_per_epoch,
+            num_envs=config.num_envs,
+            learning_rate=config.learning_rate,
+            seed=train_seed,
+            **train_kwargs,
+        )
+
+        checkpoint_path = _resolve_checkpoint_path(
+            result,
+            run_dir=run_dir,
+            config=config,
+            train_seed=train_seed,
+            save_checkpoint_fn=save_checkpoint_fn,
+        )
+
+        actual_backend = _training_backend(result.metrics)
+        final_metrics = _evaluate_final_checkpoint(
+            env,
+            config,
+            checkpoint_path,
+            template_state,
+            eval_fn=eval_fn,
+            load_checkpoint_fn=load_checkpoint_fn,
+            load_ppo_policy_fn=load_ppo_policy_fn,
+        )
+
+        run_pass, failures = _evaluate_run(
+            actual_backend=actual_backend,
+            expected_backend=expected_backend,
+            thresholds=thresholds,
+            initial_metrics=initial_metrics,
+            random_metrics=random_metrics,
+            final_metrics=final_metrics,
+        )
+
+        runs.append(
+            {
+                "train_seed": train_seed,
+                "eval_seeds": list(config.eval_seeds),
+                "backend": actual_backend,
+                "expected_backend": expected_backend,
+                "checkpoint_path": str(checkpoint_path),
+                "training_metrics": _jsonable(result.metrics),
+                "initial_policy_metrics": initial_metrics,
+                "random_policy_baseline_metrics": random_metrics,
+                "final_checkpoint_metrics": final_metrics,
+                "thresholds": thresholds.to_dict(),
+                "pass": run_pass,
+                "failures": failures,
+            }
+        )
+
+    artifact = {
+        "schema_version": 1,
+        "config_path": None,
+        "env": config.env,
+        "algo": config.algo,
+        "expected_backend": expected_backend,
+        "backend": runs[0]["backend"] if runs else expected_backend,
+        "train_seeds": list(config.train_seeds),
+        "eval_seeds": list(config.eval_seeds),
+        "thresholds": thresholds.to_dict(),
+        "runs": runs,
+        "pass": all(run["pass"] for run in runs),
+        "failures": [failure for run in runs for failure in run["failures"]],
+    }
+    return artifact
+
+
+def build_dry_run_artifact(
+    config: AcceptanceConfig,
+    thresholds: AcceptanceThresholds | None = None,
+    output_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Builds a plan artifact without executing training."""
+
+    thresholds = thresholds or config.thresholds
+    output_dir = Path(output_dir or config.output_dir)
+    return {
+        "schema_version": 1,
+        "dry_run": True,
+        "config_path": None,
+        "env": config.env,
+        "algo": config.algo,
+        "expected_backend": config.expected_backend,
+        "train_seeds": list(config.train_seeds),
+        "eval_seeds": list(config.eval_seeds),
+        "output_dir": str(output_dir),
+        "thresholds": thresholds.to_dict(),
+        "planned_runs": [
+            {
+                "train_seed": train_seed,
+                "eval_seeds": list(config.eval_seeds),
+                "expected_backend": config.expected_backend,
+            }
+            for train_seed in config.train_seeds
+        ],
+    }
+
+
+def validate_acceptance_artifact(
+    artifact: Mapping[str, Any],
+    config: AcceptanceConfig,
+    thresholds: AcceptanceThresholds | None = None,
+) -> None:
+    """Validates an acceptance artifact against the gate contract."""
+
+    thresholds = thresholds or config.thresholds
+    _require_mapping(artifact, "artifact")
+    _require_keys(
+        artifact,
+        [
+            "schema_version",
+            "env",
+            "algo",
+            "expected_backend",
+            "backend",
+            "train_seeds",
+            "eval_seeds",
+            "thresholds",
+            "runs",
+            "pass",
+        ],
+    )
+    if int(artifact["schema_version"]) != 1:
+        raise ValueError(f"Unsupported schema_version {artifact['schema_version']!r}")
+    if artifact["env"] != config.env:
+        raise ValueError(f"Artifact env {artifact['env']!r} does not match config {config.env!r}")
+    if artifact["algo"] != config.algo:
+        raise ValueError(f"Artifact algo {artifact['algo']!r} does not match config {config.algo!r}")
+    if artifact["expected_backend"] != config.expected_backend:
+        raise ValueError(
+            "Artifact expected_backend "
+            f"{artifact['expected_backend']!r} does not match config {config.expected_backend!r}"
+        )
+
+    _validate_thresholds(artifact["thresholds"], thresholds)
+    runs = artifact["runs"]
+    if not isinstance(runs, list) or not runs:
+        raise ValueError("Artifact runs must be a non-empty list.")
+    for index, run in enumerate(runs):
+        _validate_run_artifact(run, thresholds, config, index=index)
+
+
+def _validate_run_artifact(
+    run: Mapping[str, Any],
+    thresholds: AcceptanceThresholds,
+    config: AcceptanceConfig,
+    *,
+    index: int,
+) -> None:
+    _require_mapping(run, f"runs[{index}]")
+    _require_keys(
+        run,
+        [
+            "train_seed",
+            "eval_seeds",
+            "backend",
+            "expected_backend",
+            "checkpoint_path",
+            "initial_policy_metrics",
+            "random_policy_baseline_metrics",
+            "final_checkpoint_metrics",
+            "thresholds",
+            "pass",
+            "failures",
+        ],
+    )
+    if run["expected_backend"] != config.expected_backend:
+        raise ValueError(
+            f"Run {index} expected_backend {run['expected_backend']!r} "
+            f"does not match config {config.expected_backend!r}"
+        )
+    _validate_thresholds(run["thresholds"], thresholds)
+    for field_name in (
+        "initial_policy_metrics",
+        "random_policy_baseline_metrics",
+        "final_checkpoint_metrics",
+    ):
+        _validate_metrics_block(run[field_name], field_name, index)
+    if not isinstance(run["checkpoint_path"], str) or not run["checkpoint_path"]:
+        raise ValueError(f"runs[{index}].checkpoint_path must be a non-empty string.")
+    if not isinstance(run["pass"], bool):
+        raise ValueError(f"runs[{index}].pass must be a boolean.")
+    if not isinstance(run["failures"], list):
+        raise ValueError(f"runs[{index}].failures must be a list.")
+
+
+def _validate_metrics_block(block: Mapping[str, Any], name: str, index: int) -> None:
+    _require_mapping(block, f"runs[{index}].{name}")
+    _require_keys(
+        block,
+        [
+            "mean_reward",
+            "mean_episode_length",
+            "primary_metric_name",
+            "primary_metric_value",
+            "episodes",
+        ],
+    )
+
+
+def _validate_thresholds(
+    actual: Mapping[str, Any],
+    expected: AcceptanceThresholds,
+) -> None:
+    _require_mapping(actual, "thresholds")
+    _require_keys(
+        actual,
+        [
+            "min_reward_delta",
+            "primary_metric_name",
+            "primary_metric_direction",
+            "primary_metric_threshold",
+            "primary_metric_vs_random_delta",
+        ],
+    )
+    if float(actual["min_reward_delta"]) < expected.min_reward_delta:
+        raise ValueError("Artifact min_reward_delta is weaker than config.")
+    if actual["primary_metric_name"] != expected.primary_metric_name:
+        raise ValueError("Artifact primary_metric_name does not match config.")
+    if actual["primary_metric_direction"] != expected.primary_metric_direction:
+        raise ValueError("Artifact primary_metric_direction does not match config.")
+    if _threshold_is_weaker(
+        float(actual["primary_metric_threshold"]),
+        expected.primary_metric_threshold,
+        expected.primary_metric_direction,
+    ):
+        raise ValueError("Artifact primary_metric_threshold is weaker than config.")
+    if float(actual["primary_metric_vs_random_delta"]) < expected.primary_metric_vs_random_delta:
+        raise ValueError("Artifact primary_metric_vs_random_delta is weaker than config.")
+
+
+def _evaluate_run(
+    *,
+    actual_backend: str,
+    expected_backend: str,
+    thresholds: AcceptanceThresholds,
+    initial_metrics: Mapping[str, Any],
+    random_metrics: Mapping[str, Any],
+    final_metrics: Mapping[str, Any],
+) -> tuple[bool, list[str]]:
+    failures: list[str] = []
+    if actual_backend != expected_backend:
+        failures.append(f"backend mismatch: actual={actual_backend!r} expected={expected_backend!r}")
+
+    initial_reward = float(initial_metrics["mean_reward"])
+    final_reward = float(final_metrics["mean_reward"])
+    if final_reward - initial_reward < thresholds.min_reward_delta:
+        failures.append(
+            "reward delta below threshold: "
+            f"{final_reward - initial_reward:.6f} < {thresholds.min_reward_delta:.6f}"
+        )
+
+    final_primary = float(final_metrics["primary_metric_value"])
+    random_primary = float(random_metrics["primary_metric_value"])
+    if thresholds.primary_metric_direction == "max":
+        if final_primary < thresholds.primary_metric_threshold:
+            failures.append(
+                "primary metric below threshold: "
+                f"{final_primary:.6f} < {thresholds.primary_metric_threshold:.6f}"
+            )
+        if final_primary < random_primary + thresholds.primary_metric_vs_random_delta:
+            failures.append(
+                "primary metric did not beat random baseline: "
+                f"{final_primary:.6f} < "
+                f"{random_primary + thresholds.primary_metric_vs_random_delta:.6f}"
+            )
+    elif thresholds.primary_metric_direction == "min":
+        if final_primary > thresholds.primary_metric_threshold:
+            failures.append(
+                "primary metric above threshold: "
+                f"{final_primary:.6f} > {thresholds.primary_metric_threshold:.6f}"
+            )
+        if final_primary > random_primary - thresholds.primary_metric_vs_random_delta:
+            failures.append(
+                "primary metric did not beat random baseline: "
+                f"{final_primary:.6f} > "
+                f"{random_primary - thresholds.primary_metric_vs_random_delta:.6f}"
+            )
+    else:
+        failures.append(
+            f"unknown primary_metric_direction {thresholds.primary_metric_direction!r}"
+        )
+
+    return (not failures), failures
+
+
+def _resolve_checkpoint_path(
+    result: Any,
+    *,
+    run_dir: Path,
+    config: AcceptanceConfig,
+    train_seed: int,
+    save_checkpoint_fn: Callable[..., Any],
+) -> Path:
+    checkpoint_path = getattr(result, "checkpoint_path", None)
+    if checkpoint_path is None:
+        checkpoint_path = run_dir / f"{config.env}_{config.algo}_seed{train_seed}.ckpt"
+    checkpoint_path = Path(checkpoint_path)
+    if getattr(result, "train_state", None) is not None and not checkpoint_path.exists():
+        save_checkpoint_fn(checkpoint_path, result.train_state)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Acceptance checkpoint was not written: {checkpoint_path}")
+    return checkpoint_path
+
+
+def _evaluate_final_checkpoint(
+    env,
+    config: AcceptanceConfig,
+    checkpoint_path: Path,
+    template_state: Any,
+    *,
+    eval_fn: Callable[..., dict[str, Any]],
+    load_checkpoint_fn: Callable[..., Any],
+    load_ppo_policy_fn: Callable[..., Any],
+) -> dict[str, Any]:
+    if config.algo == "ppo":
+        policy = load_ppo_policy_fn(checkpoint_path)
+
+        def policy_fn(obs, key):
+            return policy(obs, key)[0]
+
+    else:
+        checkpoint = load_checkpoint_fn(checkpoint_path, template_state)
+        from dva_quadrotor_mjx.policies import select_action
+
+        policy_fn = _deterministic_policy(checkpoint, select_action)
+
+    return eval_fn(
+        env,
+        policy_fn,
+        config.eval_seeds,
+        episodes=config.eval_episodes,
+        steps=_resolve_eval_steps(config, env),
+        primary_metric_name=config.thresholds.primary_metric_name,
+    )
+
+
+def _resolve_eval_steps(config: AcceptanceConfig, env: Any) -> int:
+    if config.eval_steps is not None:
+        return int(config.eval_steps)
+    return int(getattr(env, "max_steps_in_episode", config.num_steps_per_epoch))
+
+
+def _deterministic_policy(train_state: Any, select_action_fn: Callable[[Any, Any], Any]):
+    def policy(obs, _key):
+        return select_action_fn(train_state, obs)
+
+    return policy
+
+
+def _random_policy(action_dim: int):
+    def policy(_obs, key):
+        import jax
+
+        return jax.random.uniform(key, shape=(action_dim,), minval=-1.0, maxval=1.0)
+
+    return policy
+
+
+def _training_backend(metrics: Mapping[str, Any]) -> str:
+    backend = metrics.get("backend") or metrics.get("trainer") or "unknown"
+    return str(backend)
+
+
+def _evaluate_policy_on_seeds(
+    env,
+    policy_fn: Callable[[Any, Any], Any],
+    eval_seeds,
+    *,
+    episodes: int,
+    steps: int,
+    primary_metric_name: str,
+) -> dict[str, Any]:
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+
+    episode_records: list[dict[str, Any]] = []
+    all_successes: list[bool] = []
+    all_collisions: list[bool] = []
+    for seed in eval_seeds:
+        for episode_index in range(max(int(episodes), 1)):
+            episode_seed = int(seed) + episode_index
+            key = jax.random.PRNGKey(episode_seed)
+            state = env.reset(key)
+            total_reward = 0.0
+            episode_length = 0
+            success = False
+            collision = False
+            for _ in range(int(steps)):
+                key, action_key = jax.random.split(key)
+                action = policy_fn(state.obs, action_key)
+                state = env.step(state, action)
+                total_reward += float(jnp.asarray(state.reward))
+                episode_length += 1
+                success = success or bool(jnp.asarray(state.info.get("success", False)))
+                collision = collision or bool(jnp.asarray(state.info.get("collision", False)))
+                if bool(jnp.asarray(state.done)):
+                    break
+            primary_metric_value = _extract_metric_value(
+                state,
+                primary_metric_name=primary_metric_name,
+                fallback_reward=total_reward,
+            )
+            record = {
+                "seed": episode_seed,
+                "reward": total_reward,
+                "length": episode_length,
+                "success": success,
+                "collision": collision,
+                "primary_metric_name": primary_metric_name,
+                "primary_metric_value": primary_metric_value,
+                "terminal_info": _jsonable(getattr(state, "info", {})),
+                "terminal_metrics": _jsonable(getattr(state, "metrics", {})),
+            }
+            episode_records.append(record)
+            all_successes.append(success)
+            all_collisions.append(collision)
+
+    primary_values = [record["primary_metric_value"] for record in episode_records]
+    return {
+        "mean_reward": float(np.mean([record["reward"] for record in episode_records])),
+        "mean_episode_length": float(np.mean([record["length"] for record in episode_records])),
+        "success_rate": float(np.mean(all_successes)) if all_successes else 0.0,
+        "collision_rate": float(np.mean(all_collisions)) if all_collisions else 0.0,
+        "primary_metric_name": primary_metric_name,
+        "primary_metric_value": float(np.mean(primary_values)) if primary_values else float("nan"),
+        "episodes": episode_records,
+    }
+
+
+def _extract_metric_value(state: Any, *, primary_metric_name: str, fallback_reward: float) -> float:
+    info = getattr(state, "info", {})
+    metrics = getattr(state, "metrics", {})
+    value: Any | None = None
+    if isinstance(info, Mapping) and primary_metric_name in info:
+        value = info[primary_metric_name]
+    elif isinstance(metrics, Mapping) and primary_metric_name in metrics:
+        value = metrics[primary_metric_name]
+    elif primary_metric_name in {"mean_reward", "reward"}:
+        value = fallback_reward
+
+    if value is None:
+        raise KeyError(
+            f"Primary metric {primary_metric_name!r} not found in terminal info or metrics."
+        )
+
+    import jax
+    import numpy as np
+
+    if isinstance(value, jax.Array):
+        value = np.asarray(value)
+    if hasattr(value, "shape") and getattr(value, "shape", ()) == ():
+        value = float(value)
+    return float(value)
+
+
+def _validate_metrics_value(value: Any, path: str) -> None:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{path} must be a mapping, got {type(value).__name__}")
+
+
+def _require_mapping(value: Any, path: str) -> None:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{path} must be a mapping, got {type(value).__name__}")
+
+
+def _require_keys(mapping: Mapping[str, Any], keys: list[str]) -> None:
+    missing = [key for key in keys if key not in mapping]
+    if missing:
+        raise KeyError(f"Missing required keys: {', '.join(missing)}")
+
+
+def _jsonable(value: Any) -> Any:
+    import jax
+    import numpy as np
+
+    if isinstance(value, jax.Array):
+        value = np.asarray(value)
+    if isinstance(value, np.ndarray):
+        return value.item() if value.ndim == 0 else value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Mapping):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+if __name__ == "__main__":
+    sys.exit(main())

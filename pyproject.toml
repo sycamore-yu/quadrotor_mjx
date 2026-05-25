@@ -27,12 +27,37 @@ train-jax-ppo = "dva_quadrotor_mjx.learning.train_jax_ppo:run"
 train-jax-shac = "dva_quadrotor_mjx.learning.train_jax_shac:run"
 play-dva-quadrotor = "dva_quadrotor_mjx.learning.play:run"
 
-[tool.setuptools.packages.find]
-where = ["src", "third_party/jax_shac", "third_party/rpg_flightning", "third_party/mjviser/src"]
-include = ["dva_quadrotor_mjx*", "jax_shac*", "envs*", "shac*", "utils*", "flightning*", "mjviser*"]
+[tool.setuptools]
+package-dir = { "dva_quadrotor_mjx" = "src/dva_quadrotor_mjx", "jax_shac" = "third_party/jax_shac", "flightning" = "third_party/rpg_flightning/flightning", "mjviser" = "third_party/mjviser/src/mjviser" }
+packages = [
+  "dva_quadrotor_mjx",
+  "dva_quadrotor_mjx.algorithms",
+  "dva_quadrotor_mjx.configs",
+  "dva_quadrotor_mjx.controllers",
+  "dva_quadrotor_mjx.dynamics",
+  "dva_quadrotor_mjx.envs",
+  "dva_quadrotor_mjx.envs.sensors",
+  "dva_quadrotor_mjx.learning",
+  "dva_quadrotor_mjx.networks",
+  "dva_quadrotor_mjx.utils",
+  "dva_quadrotor_mjx.wrappers",
+  "jax_shac",
+  "jax_shac.envs",
+  "jax_shac.shac",
+  "jax_shac.utils",
+  "flightning",
+  "flightning.algos",
+  "flightning.envs",
+  "flightning.modules",
+  "flightning.objects",
+  "flightning.sensors",
+  "flightning.simulation",
+  "flightning.utils",
+  "mjviser",
+]
 
 [tool.setuptools.package-data]
-dva_quadrotor_mjx = ["envs/xmls/*.xml"]
+dva_quadrotor_mjx = ["envs/xmls/*.xml", "configs/algorithms/*.yaml", "configs/tasks/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

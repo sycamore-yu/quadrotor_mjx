@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any, Callable, Dict, Optional
 
 import flax.serialization
@@ -80,9 +81,9 @@ def train(
 ) -> TrainResult:
     """Runs a trainer with a common algorithm interface.
 
-    ``ppo`` uses the Brax PPO trainer and vectorized training wrappers.  ``bptt``
-    and ``shac`` must be replaced by real backends before they satisfy the
-    OpenSpec training-parity requirements.
+    ``ppo`` uses the Brax PPO trainer and vectorized training wrappers.
+    ``bptt`` and ``shac`` dispatch to their real JAX backends; unsupported
+    algorithms fail loudly instead of falling back to diagnostic rollouts.
     """
 
     if algo == "ppo":
@@ -95,6 +96,45 @@ def train(
             seed=seed,
             **kwargs,
         )
+    if algo == "bptt":
+        return _train_jax_bptt(
+            env,
+            network=network,
+            num_epochs=num_epochs,
+            num_steps_per_epoch=num_steps_per_epoch,
+            num_envs=num_envs,
+            learning_rate=learning_rate,
+            seed=seed,
+            **kwargs,
+        )
+    if algo == "shac":
+        return _train_jax_shac(
+            env,
+            num_epochs=num_epochs,
+            num_steps_per_epoch=num_steps_per_epoch,
+            num_envs=num_envs,
+            learning_rate=learning_rate,
+            seed=seed,
+            **kwargs,
+        )
+
+    raise ValueError(f"Unsupported algorithm backend {algo!r}")
+
+
+def _train_jax_bptt(
+    env,
+    *,
+    network,
+    num_epochs: int,
+    num_steps_per_epoch: int,
+    num_envs: int,
+    learning_rate: float,
+    seed: int,
+    **kwargs,
+) -> TrainResult:
+    """Trains BPTT through the differentiable JAX scan backend."""
+
+    from dva_quadrotor_mjx.algorithms import bptt
 
     train_state = create_train_state(
         network,
@@ -102,32 +142,101 @@ def train(
         seed=seed,
         learning_rate=learning_rate,
     )
-
-    rewards = []
-    lengths = []
-    key = jax.random.PRNGKey(seed)
-    for epoch in range(num_epochs):
-        key, episode_key = jax.random.split(key)
-        episode = _run_episode(env, train_state, episode_key, num_steps_per_epoch)
-        rewards.append(episode["reward"])
-        lengths.append(episode["length"])
-
+    start = time.time()
+    result = bptt.train(
+        env,
+        train_state=train_state,
+        num_epochs=num_epochs,
+        num_steps_per_epoch=num_steps_per_epoch,
+        num_envs=num_envs,
+        key=jax.random.PRNGKey(seed),
+    )
+    losses = jax.block_until_ready(result["metrics"])
+    runner_state = result["runner_state"]
+    final_train_state = runner_state.train_state
+    train_time = time.time() - start
+    loss_values = np.asarray(losses)
+    mean_reward = float(-loss_values[-1]) if loss_values.size else float("nan")
     metrics = {
-        "algo": algo,
+        "algo": "bptt",
+        "backend": "jax_bptt",
         "epochs": num_epochs,
         "steps_per_epoch": num_steps_per_epoch,
-        "requested_num_envs": num_envs,
-        "episode_reward": rewards,
-        "episode_length": lengths,
-        "mean_reward": float(sum(rewards) / max(len(rewards), 1)),
-        "mean_episode_length": float(sum(lengths) / max(len(lengths), 1)),
-        "backend": "smoke_rollout",
-        "note": (
-            "Diagnostic rollout only. This does not satisfy the OpenSpec "
-            "training-parity backend requirement."
-        ),
+        "num_envs": num_envs,
+        "loss": loss_values.tolist(),
+        "mean_reward": mean_reward,
+        "train_time_seconds": train_time,
+        "sps": float(num_epochs * num_steps_per_epoch * num_envs / max(train_time, 1e-9)),
     }
-    return TrainResult(params=train_state.params, metrics=metrics, train_state=train_state)
+    return TrainResult(
+        params=final_train_state.params,
+        metrics=metrics,
+        train_state=final_train_state,
+    )
+
+
+def _train_jax_shac(
+    env,
+    *,
+    num_epochs: int,
+    num_steps_per_epoch: int,
+    num_envs: int,
+    learning_rate: float,
+    seed: int,
+    **kwargs,
+) -> TrainResult:
+    """Trains SHAC through the vendored ``jax_shac`` backend."""
+
+    from dva_quadrotor_mjx.algorithms import shac
+
+    num_timesteps = int(
+        kwargs.pop("num_timesteps", num_epochs * num_steps_per_epoch * num_envs)
+    )
+    checkpoint_dir = Path(kwargs.pop("checkpoint_dir", "artifacts/shac_checkpoints"))
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    start = time.time()
+    result = shac.train(
+        env,
+        policy_network=None,
+        value_network=None,
+        num_timesteps=num_timesteps,
+        episode_length=num_steps_per_epoch,
+        num_envs=num_envs,
+        num_eval_envs=int(kwargs.pop("num_eval_envs", min(num_envs, 128))),
+        actor_learning_rate=learning_rate,
+        critic_learning_rate=float(kwargs.pop("critic_learning_rate", learning_rate)),
+        seed=seed,
+        checkpoint_dir=str(checkpoint_dir),
+        eval_env=kwargs.pop("eval_env", env),
+        **kwargs,
+    )
+    raw_metrics = dict(result["metrics"])
+    train_time = time.time() - start
+    metrics = _compact_training_metrics(raw_metrics)
+    if "training/policy_loss" in raw_metrics:
+        metrics["actor_loss"] = float(np.mean(np.asarray(raw_metrics["training/policy_loss"])))
+    if "training/v_loss" in raw_metrics:
+        metrics["value_loss"] = float(np.mean(np.asarray(raw_metrics["training/v_loss"])))
+    metrics.update(
+        {
+            "algo": "shac",
+            "backend": "jax_shac",
+            "num_timesteps": num_timesteps,
+            "num_envs": num_envs,
+            "episode_length": num_steps_per_epoch,
+            "checkpoint_dir": str(checkpoint_dir),
+            "train_time_seconds": train_time,
+        }
+    )
+    if "eval/episode_reward" in metrics:
+        metrics["mean_reward"] = float(np.asarray(metrics["eval/episode_reward"]))
+    checkpoint_path = checkpoint_dir / "checkpoint.pkl"
+    return TrainResult(
+        params=result["params"],
+        metrics=metrics,
+        train_state=None,
+        checkpoint_path=checkpoint_path if checkpoint_path.exists() else None,
+    )
 
 
 def _train_brax_ppo(
@@ -197,6 +306,7 @@ def _train_brax_ppo(
     merged_metrics.update(
         {
             "algo": "ppo",
+            "backend": "brax_ppo",
             "trainer": "brax_ppo",
             "num_timesteps": num_timesteps,
             "num_envs": num_envs,
@@ -250,6 +360,34 @@ def eval(
         success_rate=float(sum(successes) / max(len(successes), 1)),
         collision_rate=float(sum(collisions) / max(len(collisions), 1)),
     )
+
+
+def _compact_training_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Keeps scalar trainer metrics and drops large gradient tensors."""
+
+    compact: Dict[str, Any] = {}
+    for key, value in metrics.items():
+        array = None
+        if isinstance(value, jax.Array):
+            array = np.asarray(value)
+        elif isinstance(value, np.ndarray):
+            array = value
+        elif isinstance(value, np.generic):
+            compact[key] = value.item()
+            continue
+        elif isinstance(value, (int, float, str, bool)):
+            compact[key] = value
+            continue
+
+        if array is None:
+            continue
+        if array.ndim == 0:
+            compact[key] = array.item()
+        elif array.size <= 4:
+            compact[key] = array.tolist()
+        elif key.endswith(("loss", "reward", "sps", "walltime")):
+            compact[f"{key}_mean"] = float(np.mean(array))
+    return compact
 
 
 def make_policy(checkpoint: TrainState) -> Callable:

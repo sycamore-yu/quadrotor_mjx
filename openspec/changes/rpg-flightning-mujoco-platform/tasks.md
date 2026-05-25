@@ -30,8 +30,8 @@
 - [x] 3.2 Implement `gate_crossing` MJCF/assets and env class.
 - [x] 3.3 Implement `forest_navigation` MJCF/assets/procedural generator and env class.
 - [x] 3.4 Register all three envs in `envs/registry.py`.
-- [ ] 3.5 Add sensor configs for state-only, feature, rangefinder, RGB/depth modes.
-- [ ] 3.6 Add deterministic reset tests for every env.
+- [x] 3.5 Add sensor configs for state-only, feature, rangefinder, RGB/depth modes.
+- [x] 3.6 Add deterministic reset tests for every env.
 - [ ] 3.7 Add success/failure tests for every env:
   - hover obstacle: clearance, collision, target hold.
   - gate crossing: pass gate, miss gate, collide gate, timeout.
@@ -59,8 +59,8 @@
   - `make_policy(checkpoint) -> callable`
 - [ ] 4.5 Add save/load parity test based on `rpg_flightning/examples/save_load_policy.ipynb`.
 - [x] 4.6 Fold APG into the BPTT public algorithm track while keeping APG placeholders reserved for `dva-quadrotor-mjx`.
-- [ ] 4.7 Remove fallback smoke/baseline rollout as an accepted training backend for `bptt` and `shac`.
-- [ ] 4.8 Add backend assertion tests: metrics for `bptt`, `ppo`, and `shac` SHALL report `jax_bptt`, `brax_ppo`, and `jax_shac` respectively.
+- [x] 4.7 Remove fallback smoke/baseline rollout as an accepted training backend for `bptt` and `shac`.
+- [x] 4.8 Add backend assertion tests: metrics for `bptt`, `ppo`, and `shac` SHALL report `jax_bptt`, `brax_ppo`, and `jax_shac` respectively.
 - [ ] 4.9 Add backend completion contract tests for each claimed-complete backend:
   non-smoke training writes concrete backend metrics, writes a reloadable
   checkpoint, works with `eval.py`, `render.py`, and `play-dva-quadrotor`, and
@@ -116,7 +116,7 @@ Full training gates:
 - [ ] 6.23 `forest_navigation + bptt` beats random-policy baseline on goal-progress, tree-collision, and rangefinder-clearance metrics.
 - [ ] 6.24 `forest_navigation + ppo` beats random-policy baseline on goal-progress, tree-collision, and rangefinder-clearance metrics.
 - [ ] 6.25 `forest_navigation + shac` beats random-policy baseline on goal-progress, tree-collision, and rangefinder-clearance metrics.
-- [ ] 6.26 Implement the gate runner that records fixed train/eval seeds, initial/random baseline metrics, final checkpoint metrics, thresholds, checkpoint path, and pass/fail result.
+- [x] 6.26 Implement the gate runner that records fixed train/eval seeds, initial/random baseline metrics, final checkpoint metrics, thresholds, checkpoint path, and pass/fail result.
 
 ## 7. Visualization And Replay
 
@@ -129,7 +129,7 @@ Full training gates:
 ## 8. Final Acceptance
 
 - [x] 8.1 `openspec validate rpg-flightning-mujoco-platform --strict` passes.
-- [ ] 8.2 `python -m pytest tests -q` passes without manual environment variables.
+- [x] 8.2 `python -m pytest tests -q` passes without manual environment variables.
 - [x] 8.3 All smoke train commands in section 6 pass.
 - [ ] 8.4 Three scene visualization commands in section 7 pass.
 - [x] 8.5 Final README section documents exact train/eval/render commands.

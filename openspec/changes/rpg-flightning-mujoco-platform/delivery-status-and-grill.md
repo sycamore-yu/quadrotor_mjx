@@ -40,17 +40,33 @@ mistaken for completed work.
 - Grill consensus now rejects "pending real trainer" as a shippable state:
   incomplete BPTT/SHAC backends must remain explicit open work, not a hidden
   compromise behind successful smoke commands.
+- BPTT dispatch now uses the real `jax_bptt` scan/gradient backend for smoke
+  and short runs, and its metrics report `backend="jax_bptt"`.
+- SHAC dispatch now uses the vendored `jax_shac` backend without the previous
+  `typeguard`/`jaxtyping` runtime failure, writes checkpoints under
+  `artifacts/`, and its smoke metrics report `backend="jax_shac"`.
+- Backend contract tests now reject `smoke_rollout` as a completion backend and
+  assert `jax_bptt`, `brax_ppo`, and `jax_shac` backend names.
+- The acceptance gate runner now records seeds, initial/random/final metrics,
+  thresholds, checkpoint path, backend, and pass/fail, with tests for stronger
+  threshold overrides and artifact validation.
+- Scene task configs now include `state`, `feature`, `rangefinder`, and
+  `rgb_depth` sensor mode metadata.
+- Scene deterministic reset tests now cover all three scene envs.
 
 ### Not Yet Delivered
 
-- `jax_bptt` backend is not implemented.
-- `jax_shac` backend is not implemented.
-- Backend assertion tests are not implemented.
-- Full `python -m pytest tests -q` is not yet verified in the current state.
-- Deterministic reset and success/failure tests for all three scene envs remain
-  incomplete.
-- Sensor configs for state-only, feature, rangefinder, RGB/depth modes remain
-  incomplete.
+- `jax_bptt` full completion remains pending: reward-improvement gates and
+  eval/render/play checkpoint compatibility are not verified for every
+  acceptance env.
+- `jax_shac` full completion remains pending: it still needs the project-owned
+  adapted backend contract from Decision 5, plus reward-improvement gates and
+  eval/render/play checkpoint compatibility for every acceptance env.
+- Full `python -m pytest tests -q` passes in the current state
+  (`51 passed, 1 warning`, 2026-05-25).
+- Full success/failure tests for all three scene envs remain incomplete:
+  target hold, gate pass/collide/timeout, and forest rangefinder-hit cases are
+  still open.
 - Full learning gates are not complete:
   all `bptt`, `ppo`, and `shac` combinations across `hover_state`,
   `hover_obstacle`, `gate_crossing`, and `forest_navigation`, plus

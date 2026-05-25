@@ -5,3 +5,19 @@ delay: 0.02
 reward_sharpness: 1.0
 action_penalty_weight: 1.0
 skip_frames: 1
+sensor_modes:
+  default: feature
+  available: [feature, state, rangefinder, rgb_depth]
+  feature:
+    camera_model: double_sphere
+    landmarks: hover_landmarks
+  state:
+    observation: proprioceptive_state
+  rangefinder:
+    sensors: [rangefinder_front]
+    max_range: 10.0
+  rgb_depth:
+    camera: track
+    width: 64
+    height: 48
+    differentiable: false

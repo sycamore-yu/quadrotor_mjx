@@ -69,9 +69,7 @@ def train(
                         action = train_state.apply_fn(params, last_obs)
 
                         # Env step
-                        key, key_ = jax.random.split(key)
-                        key_step = jax.random.split(key_, num_envs)
-                        next_state = env.step(env_state, action, key_step)
+                        next_state = env.step(env_state, action)
 
                         runner_state = RunnerState(
                             train_state, next_state, next_state.obs, key, epoch_idx

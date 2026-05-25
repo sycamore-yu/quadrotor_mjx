@@ -91,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
     metrics_path = output_dir / f"{stem}_metrics.json"
     if args.algo == "ppo":
         config.setdefault("checkpoint_dir", str((output_dir / f"{stem}_checkpoints").resolve()))
+        if args.smoke:
+            config.setdefault("num_timesteps", 0)
+            config.setdefault("run_evals", False)
         if args.num_timesteps is not None:
             config.setdefault("num_timesteps", args.num_timesteps)
 
@@ -141,6 +144,8 @@ def _jsonable(value: Any) -> Any:
         return value.item() if value.ndim == 0 else value.tolist()
     if isinstance(value, np.generic):
         return value.item()
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

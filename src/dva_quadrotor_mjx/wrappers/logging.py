@@ -17,7 +17,13 @@ class LogWrapper(Wrapper):
             "returned_episode": jnp.zeros(()),
         })
         
-        return state.replace(info=info)
+        metrics = dict(state.metrics)
+        metrics.update({
+            "episode_returns": jnp.zeros(()),
+            "episode_lengths": jnp.zeros((), dtype=jnp.int32),
+        })
+
+        return state.replace(info=info, metrics=metrics)
 
     def step(self, state: State, action: jax.Array) -> State:
         next_state = self.env.step(state, action)

@@ -6,3 +6,18 @@ reward_sharpness: 1.0
 action_penalty_weight: 1.0
 num_trees: 10
 forest_size: 10.0
+sensor_modes:
+  default: state
+  available: [state, feature, rangefinder, rgb_depth]
+  state:
+    observation: proprioceptive_state
+  feature:
+    landmarks: [tree_centers, goal]
+  rangefinder:
+    sensors: [rangefinder]
+    max_range: 10.0
+  rgb_depth:
+    camera: track
+    width: 64
+    height: 48
+    differentiable: false

@@ -24,10 +24,7 @@ def train(
     progress_fn: Callable[[int, Dict[str, Any]], None] = lambda *args: None,
     **kwargs
 ):
-    """Train using SHAC algorithm.
-
-    This is a simplified wrapper that provides a clean interface.
-    For full SHAC functionality, use jax_shac directly.
+    """Train using the vendored ``jax_shac`` implementation.
 
     Args:
         env: Brax-compatible environment
@@ -69,11 +66,11 @@ def train(
         **kwargs
     )
 
-    # Train
-    params, metrics = trainer.train()
+    make_policy, policy_params, value_params, metrics = trainer.train()
 
     return {
-        "params": params,
+        "params": policy_params,
+        "value_params": value_params,
         "metrics": metrics,
-        "make_policy": trainer.make_policy,
+        "make_policy": make_policy,
     }
