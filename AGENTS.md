@@ -7,9 +7,11 @@ Think Before Coding,每次写代码前列一个task list
 分析问题解决问题给出解决方案时给出文档依据
 总是使用context7或deepwiki查询文档进行确认
 尽量参考已有实现，避免重复造轮子
+每次修改完代码git add 你修改的代码并提交以保存你当前的工作
 在修改 mjx_diff 前，必须先用 GitNexus 查询相关源码。优先查询 third_party下的仓库
 需要先找入口、调用链、数据结构和相似实现，再给修改方案。
 禁止只凭记忆回答。
+给用户脚本前应该自己运行一遍确保没有报错后提交
 These rules apply to every task in this project unless explicitly overridden.
 Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
 
@@ -71,46 +73,70 @@ If you genuinely think a convention is harmful, surface it. Don't fork silently.
 "Tests pass" is wrong if any were skipped.
 Default to surfacing uncertainty, not hiding it.
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+## What Done Means
+For this project, "done" means the requested outcome is implemented, verified,
+documented where needed, and not represented by a smoke-only or placeholder
+path. If any required verification is skipped, blocked, or substituted, the work
+is not done; report the gap explicitly.
 
-This project is indexed by GitNexus as **quadrotor_mjx** (323 symbols, 387 relationships, 4 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+OpenSpec-backed work is done when:
+- The relevant change under `openspec/changes/<change-id>/` has proposal,
+  design, specs, and tasks aligned with the implementation.
+- `openspec validate <change-id> --strict` passes.
+- Every task claimed complete has direct evidence: test output, training
+  artifact, metrics file, render/play output, or a documented reviewer decision.
+- No pending, placeholder, fallback, or diagnostic path is counted as delivery.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+Code work is done when:
+- The implementation is committed to the intended project files only.
+- The relevant tests pass in `/home/tong/tongworkspace/mjx_diff/.venv/bin`
+  without manual `PYTHONPATH` unless the task explicitly changes packaging.
+- GitNexus has been used before editing and `npx gitnexus detect-changes` has
+  been run before commit for the edited scope.
+- Existing user changes are not reverted or hidden inside unrelated commits.
 
-## Always Do
+Training work is done when:
+- The training command uses the intended backend, and metrics identify the
+  concrete backend name.
+- Smoke commands are treated as wiring checks, not learning evidence.
+- Non-smoke training writes a reloadable checkpoint and metrics artifact.
+- `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor` can consume
+  the checkpoint or the limitation is recorded as an open task.
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+For `rpg-flightning-mujoco-platform`, delivery requires:
+- `bptt`, `ppo`, and `shac` each use real backends: `jax_bptt`, `brax_ppo`, and
+  `jax_shac`.
+- Every algorithm-env pair across `hover_state`, `hover_obstacle`,
+  `gate_crossing`, and `forest_navigation` passes the configured
+  reward-improvement gate.
+- Every scene algorithm-env pair beats its random-policy baseline on the scene
+  primary metrics.
+- Three mjviser scene commands and the final evaluation/render paths are
+  verified on the headless server.
 
-## Never Do
+## How To Verify Work
+Use the smallest verification set that proves the actual claim. Do not present
+a broader claim than the commands you ran can prove.
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+Minimum verification commands for OpenSpec changes:
+- `openspec validate <change-id> --strict`
+- `rg -n "pending|placeholder|fake|smoke-only|baseline rollout|not implemented|TODO|FIXME" openspec/changes/<change-id>`
 
-## Resources
+Minimum verification commands for Python/package changes:
+- `.venv/bin/python -m compileall -q src/dva_quadrotor_mjx scripts`
+- `.venv/bin/python -m pytest tests -q`
 
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/quadrotor_mjx/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/quadrotor_mjx/clusters` | All functional areas |
-| `gitnexus://repo/quadrotor_mjx/processes` | All execution flows |
-| `gitnexus://repo/quadrotor_mjx/process/{name}` | Step-by-step execution trace |
+Minimum verification commands for training CLI changes:
+- Run the exact user-facing command before giving it to the user.
+- Inspect the metrics artifact and confirm the backend field and checkpoint path.
+- Run eval/render/play against the produced checkpoint when the task claims
+  checkpoint usability.
 
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
+Reward-improvement gate verification records:
+- train seeds and eval seeds
+- initial-policy metrics
+- random-policy baseline metrics
+- final checkpoint metrics
+- configured thresholds
+- checkpoint path
+- pass/fail result
