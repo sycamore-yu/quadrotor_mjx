@@ -1,0 +1,13 @@
+algo: ppo
+num_epochs: 100
+num_steps_per_epoch: 100
+num_envs: 128
+learning_rate: 3e-4
+ppo_config:
+  gamma: 0.99
+  gae_lambda: 0.95
+  update_epochs: 4
+  clip_eps: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.0
+  num_minibatches: 4

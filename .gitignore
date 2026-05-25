@@ -31,7 +31,7 @@ env/
 Thumbs.db
 
 # third_party dependencies (managed separately)
-third_party/
+#third_party/
 
 # openspec design docs (managed separately)
 openspec/
@@ -50,6 +50,8 @@ logs/
 wandb/
 outputs/
 results/
+artifacts/
+*.mp4
 
 # Temporary files
 *.tmp

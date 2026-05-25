@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dva-quadrotor-mjx"
+version = "0.1.0"
+description = "MJX quadrotor research platform for SHAC and D.VA experiments."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "jax>=0.6",
+  "mujoco>=3.6",
+  "mujoco-mjx>=3.6",
+  "numpy>=1.26",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src", "jax_shac" = "third_party/jax_shac", "flightning" = "third_party/rpg_flightning/flightning", "mjviser" = "third_party/mjviser/src/mjviser" }
+packages = ["dva_quadrotor_mjx", "jax_shac", "flightning", "mjviser"]
+
+[tool.setuptools.package-data]
+dva_quadrotor_mjx = ["envs/xmls/*.xml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"

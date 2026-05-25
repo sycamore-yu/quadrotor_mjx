@@ -1,0 +1,5 @@
+algo: bptt
+num_epochs: 100
+num_steps_per_epoch: 100
+num_envs: 128
+learning_rate: 1e-3

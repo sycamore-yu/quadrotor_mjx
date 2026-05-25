@@ -1,0 +1,8 @@
+env: forest_navigation
+max_steps_in_episode: 2000
+dt: 0.02
+delay: 0.02
+reward_sharpness: 1.0
+action_penalty_weight: 1.0
+num_trees: 10
+forest_size: 10.0
