@@ -248,6 +248,13 @@ Required work:
 - No notebook-only path.
 - Configurable env/algo YAML.
 - Checkpoint save/load.
+- Use the MuJoCo Playground training shape: registry-loaded env, `wrap_for_brax_training`, Brax PPO vectorized trainer, and Brax/Orbax checkpoint directories.
+
+Implementation note:
+
+- The earlier CLI implementation was a smoke/baseline rollout adapter. It matched Playground naming and package entry points, but not the actual Playground training backend.
+- That compromise existed to keep the 3x3 smoke matrix runnable while env semantics and package structure were still moving.
+- This OpenSpec now treats that as insufficient for PPO parity: PPO must run through Brax PPO and the vectorized training wrapper chain. BPTT and SHAC keep explicit pending tasks until their real trainers replace the baseline adapter.
 
 Acceptance:
 

@@ -1,132 +1,94 @@
-"""Render script for trained policies using MuJoCo viewer."""
+"""Offline MuJoCo rendering for random or checkpoint policies."""
+
+from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+_xla_flags = os.environ.get("XLA_FLAGS", "")
+if "--xla_gpu_triton_gemm_any=True" not in _xla_flags:
+    _xla_flags += " --xla_gpu_triton_gemm_any=True"
+os.environ["XLA_FLAGS"] = _xla_flags.strip()
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 import jax
 import jax.numpy as jnp
-from flax import linen as nn
-from flax.training.train_state import TrainState
 import mujoco
-import mujoco.viewer
+import numpy as np
 
-from dva_quadrotor_mjx.envs.registry import load
 from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
+from dva_quadrotor_mjx.envs.registry import load
+from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+from dva_quadrotor_mjx.policies import SUPPORTED_ALGOS, create_train_state, make_network, select_action
 from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
 
-class DeterministicMLP(nn.Module):
-    """Deterministic policy network."""
-    hidden_dims: tuple = (128, 128)
-    action_dim: int = 4
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Render a quadrotor rollout")
+    parser.add_argument("--env", required=True)
+    parser.add_argument("--algo", choices=SUPPORTED_ALGOS, default="bptt")
+    parser.add_argument("--checkpoint")
+    parser.add_argument("--random-policy", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--steps", type=int, default=300)
+    parser.add_argument("--output", type=str, default="artifacts/render.mp4")
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
+    args = parser.parse_args(argv)
 
-    @nn.compact
-    def __call__(self, x):
-        for dim in self.hidden_dims:
-            x = nn.Dense(dim)(x)
-            x = nn.relu(x)
-        x = nn.Dense(self.action_dim)(x)
-        return x
+    env = NormalizeActionWrapper(load(args.env))
+    base_env = getattr(env, "env", env)
+    ppo_policy = load_ppo_policy(args.checkpoint) if args.algo == "ppo" and args.checkpoint else None
+    train_state = None
+    if ppo_policy is None:
+        network = make_network(args.algo, env.action_space.shape[0])
+        train_state = create_train_state(
+            network,
+            env.observation_size,
+            seed=args.seed,
+            learning_rate=3e-4,
+        )
+        if args.checkpoint:
+            train_state = load_checkpoint(args.checkpoint, train_state)
 
-
-class ActorCriticMLP(nn.Module):
-    """Actor-Critic network."""
-    hidden_dims: tuple = (128, 128)
-    action_dim: int = 4
-
-    @nn.compact
-    def __call__(self, x):
-        for dim in self.hidden_dims:
-            x = nn.Dense(dim)(x)
-            x = nn.relu(x)
-        actor = nn.Dense(self.action_dim)(x)
-        actor = nn.tanh(actor)
-        critic = nn.Dense(1)(x)
-        critic = jnp.squeeze(critic, axis=-1)
-        return actor, critic
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Render a trained policy")
-    parser.add_argument("--env", type=str, required=True, help="Environment name")
-    parser.add_argument("--algo", type=str, required=True, choices=["bptt", "ppo", "shac"], help="Algorithm")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint file")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
-    parser.add_argument("--duration", type=float, default=10.0, help="Render duration in seconds")
-    args = parser.parse_args()
-
-    # Create environment
-    env = load(args.env)
-    env = NormalizeActionWrapper(env)
-
-    # Create network
-    action_dim = env.action_space.shape[0]
-
-    if args.algo == "bptt":
-        network = DeterministicMLP(action_dim=action_dim)
-    else:
-        network = ActorCriticMLP(action_dim=action_dim)
-
-    # Initialize template train state
-    import optax
-    dummy_obs = jnp.zeros(env.observation_size)
-    params = network.init(jax.random.PRNGKey(0), dummy_obs)
-    tx = optax.adam(1e-3)
-    template_state = TrainState.create(
-        apply_fn=network.apply,
-        params=params,
-        tx=tx,
-    )
-
-    # Load checkpoint
-    print(f"Loading checkpoint from {args.checkpoint}")
-    checkpoint = load_checkpoint(args.checkpoint, template_state)
-
-    # Create policy function
-    def policy(obs):
-        if args.algo == "bptt":
-            return checkpoint.apply_fn(checkpoint.params, obs)
-        else:
-            actor, _ = checkpoint.apply_fn(checkpoint.params, obs)
-            return actor
-
-    # Reset environment
-    rng = jax.random.PRNGKey(args.seed)
-    state = env.reset(rng)
-
-    # Get MuJoCo model and data for rendering
-    mj_model = env.model
+    key = jax.random.PRNGKey(args.seed)
+    state = env.reset(key)
+    mj_model = base_env.model
     mj_data = mujoco.MjData(mj_model)
+    renderer = mujoco.Renderer(mj_model, height=args.height, width=args.width)
 
-    # Copy initial state
-    mj_data.qpos[:] = jnp.array(state.pipeline_state.qpos)
-    mj_data.qvel[:] = jnp.array(state.pipeline_state.qvel)
+    frames = []
+    for step in range(args.steps):
+        key, action_key = jax.random.split(key)
+        if args.random_policy:
+            action = jax.random.uniform(action_key, (env.action_space.shape[0],), minval=-1.0, maxval=1.0)
+        elif ppo_policy is not None:
+            action = ppo_policy(state.obs, action_key)[0]
+        else:
+            action = select_action(train_state, state.obs)
+        state = env.step(state, action)
+        mj_data.qpos[:] = np.asarray(state.pipeline_state.qpos)
+        mj_data.qvel[:] = np.asarray(state.pipeline_state.qvel)
+        mujoco.mj_forward(mj_model, mj_data)
+        renderer.update_scene(mj_data)
+        frames.append(renderer.render())
+        if bool(jnp.asarray(state.done)):
+            state = env.reset(action_key)
 
-    print(f"Rendering {args.env} for {args.duration} seconds")
-    print("Close the viewer window to stop")
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import imageio.v2 as imageio
 
-    # Run simulation with viewer
-    with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
-        start_time = mj_data.time
-        while viewer.is_running() and mj_data.time - start_time < args.duration:
-            # Get action from policy
-            obs = jnp.array(state.obs)
-            action = policy(obs)
-            action = jnp.array(action)
-
-            # Step environment
-            state = env.step(state, action)
-
-            # Update MuJoCo data
-            mj_data.qpos[:] = jnp.array(state.pipeline_state.qpos)
-            mj_data.qvel[:] = jnp.array(state.pipeline_state.qvel)
-            mujoco.mj_forward(mj_model, mj_data)
-
-            # Sync viewer
-            viewer.sync()
-
-    print("Render complete!")
+        imageio.mimsave(output, frames, fps=30)
+        print(f"Rendered video: {output}")
+    except Exception as exc:
+        fallback = output.with_suffix(".npz")
+        np.savez_compressed(fallback, frames=np.asarray(frames))
+        print(f"Video writer unavailable ({exc}); wrote frames: {fallback}")
     return 0
 
 

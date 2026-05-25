@@ -1,97 +1,106 @@
-"""Evaluation script for trained policies."""
+"""Evaluate a quadrotor MJX checkpoint."""
+
+from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+_xla_flags = os.environ.get("XLA_FLAGS", "")
+if "--xla_gpu_triton_gemm_any=True" not in _xla_flags:
+    _xla_flags += " --xla_gpu_triton_gemm_any=True"
+os.environ["XLA_FLAGS"] = _xla_flags.strip()
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 import jax
 import jax.numpy as jnp
-from flax import linen as nn
-from flax.training.train_state import TrainState
 
+from dva_quadrotor_mjx.algorithms.trainer import eval as eval_policy
+from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
 from dva_quadrotor_mjx.envs.registry import load
-from dva_quadrotor_mjx.algorithms.trainer import eval, load_checkpoint
+from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+from dva_quadrotor_mjx.policies import SUPPORTED_ALGOS, create_train_state, make_network
 from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
 
-class DeterministicMLP(nn.Module):
-    """Deterministic policy network."""
-    hidden_dims: tuple = (128, 128)
-    action_dim: int = 4
-
-    @nn.compact
-    def __call__(self, x):
-        for dim in self.hidden_dims:
-            x = nn.Dense(dim)(x)
-            x = nn.relu(x)
-        x = nn.Dense(self.action_dim)(x)
-        return x
-
-
-class ActorCriticMLP(nn.Module):
-    """Actor-Critic network."""
-    hidden_dims: tuple = (128, 128)
-    action_dim: int = 4
-
-    @nn.compact
-    def __call__(self, x):
-        for dim in self.hidden_dims:
-            x = nn.Dense(dim)(x)
-            x = nn.relu(x)
-        actor = nn.Dense(self.action_dim)(x)
-        actor = nn.tanh(actor)
-        critic = nn.Dense(1)(x)
-        critic = jnp.squeeze(critic, axis=-1)
-        return actor, critic
-
-
-def main():
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate a trained policy")
-    parser.add_argument("--env", type=str, required=True, help="Environment name")
-    parser.add_argument("--algo", type=str, required=True, choices=["bptt", "ppo", "shac"], help="Algorithm")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint file")
-    parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
-    args = parser.parse_args()
+    parser.add_argument("--env", required=True)
+    parser.add_argument("--algo", choices=SUPPORTED_ALGOS, required=True)
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args(argv)
 
-    # Create environment
-    env = load(args.env)
-    env = NormalizeActionWrapper(env)
+    env = NormalizeActionWrapper(load(args.env))
+    if args.algo == "ppo":
+        policy = load_ppo_policy(args.checkpoint)
+        result = _eval_brax_policy(policy, env, args.episodes, args.seed, args.steps)
+        print(f"Mean reward: {result['mean_reward']:.6f}")
+        print(f"Mean episode length: {result['mean_episode_length']:.2f}")
+        print(f"Success rate: {result['success_rate']:.3f}")
+        print(f"Collision rate: {result['collision_rate']:.3f}")
+        return 0
 
-    # Create network
-    action_dim = env.action_space.shape[0]
-
-    if args.algo == "bptt":
-        network = DeterministicMLP(action_dim=action_dim)
-    else:
-        network = ActorCriticMLP(action_dim=action_dim)
-
-    # Initialize template train state
-    import optax
-    dummy_obs = jnp.zeros(env.observation_size)
-    params = network.init(jax.random.PRNGKey(0), dummy_obs)
-    tx = optax.adam(1e-3)
-    template_state = TrainState.create(
-        apply_fn=network.apply,
-        params=params,
-        tx=tx,
+    network = make_network(args.algo, env.action_space.shape[0])
+    template = create_train_state(
+        network,
+        env.observation_size,
+        seed=args.seed,
+        learning_rate=3e-4,
+    )
+    checkpoint = load_checkpoint(Path(args.checkpoint), template)
+    result = eval_policy(
+        checkpoint,
+        env,
+        episodes=args.episodes,
+        seed=args.seed,
+        max_steps=args.steps,
     )
 
-    # Load checkpoint
-    print(f"Loading checkpoint from {args.checkpoint}")
-    checkpoint = load_checkpoint(args.checkpoint, template_state)
-
-    # Evaluate
-    print(f"Evaluating on {args.env} for {args.episodes} episodes")
-    result = eval(checkpoint, env, episodes=args.episodes, seed=args.seed)
-
-    print(f"Results:")
-    print(f"  Mean reward: {result.mean_reward:.2f}")
-    print(f"  Mean episode length: {result.mean_episode_length:.2f}")
-    if result.success_rate is not None:
-        print(f"  Success rate: {result.success_rate:.2%}")
-
+    print(f"Mean reward: {result.mean_reward:.6f}")
+    print(f"Mean episode length: {result.mean_episode_length:.2f}")
+    print(f"Success rate: {result.success_rate:.3f}")
+    print(f"Collision rate: {result.collision_rate:.3f}")
     return 0
+
+
+def _eval_brax_policy(policy, env, episodes: int, seed: int, steps: int) -> dict[str, float]:
+    rewards = []
+    lengths = []
+    successes = []
+    collisions = []
+    key = jax.random.PRNGKey(seed)
+    for _ in range(episodes):
+        key, reset_key = jax.random.split(key)
+        state = env.reset(reset_key)
+        total_reward = 0.0
+        episode_length = 0
+        success = False
+        collision = False
+        for _ in range(steps):
+            key, action_key = jax.random.split(key)
+            action = policy(state.obs, action_key)[0]
+            state = env.step(state, action)
+            total_reward += float(jnp.asarray(state.reward))
+            episode_length += 1
+            success = success or bool(jnp.asarray(state.info.get("success", False)))
+            collision = collision or bool(jnp.asarray(state.info.get("collision", False)))
+            if bool(jnp.asarray(state.done)):
+                break
+        rewards.append(total_reward)
+        lengths.append(episode_length)
+        successes.append(success)
+        collisions.append(collision)
+    return {
+        "mean_reward": float(sum(rewards) / max(len(rewards), 1)),
+        "mean_episode_length": float(sum(lengths) / max(len(lengths), 1)),
+        "success_rate": float(sum(successes) / max(len(successes), 1)),
+        "collision_rate": float(sum(collisions) / max(len(collisions), 1)),
+    }
 
 
 if __name__ == "__main__":

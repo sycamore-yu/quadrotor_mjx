@@ -7,7 +7,12 @@ import os
 import sys
 from pathlib import Path
 
+_xla_flags = os.environ.get("XLA_FLAGS", "")
+if "--xla_gpu_triton_gemm_any=True" not in _xla_flags:
+    _xla_flags += " --xla_gpu_triton_gemm_any=True"
+os.environ["XLA_FLAGS"] = _xla_flags.strip()
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import jax
 import mujoco
@@ -21,6 +26,7 @@ except ImportError:
 
 from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
 from dva_quadrotor_mjx.envs.registry import load
+from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
 from dva_quadrotor_mjx.policies import SUPPORTED_ALGOS, create_train_state, make_network, select_action
 from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
@@ -43,15 +49,19 @@ def main(argv: list[str] | None = None) -> int:
     key = jax.random.PRNGKey(args.seed)
     state_box = {"state": env.reset(key), "key": key, "steps": 0}
 
-    network = make_network(args.algo, env.action_space.shape[0])
-    train_state = create_train_state(
-        network,
-        env.observation_size,
-        seed=args.seed,
-        learning_rate=3e-4,
-    )
+    ppo_policy = load_ppo_policy(args.checkpoint) if args.algo == "ppo" and args.checkpoint else None
+    train_state = None
+    if ppo_policy is None:
+        network = make_network(args.algo, env.action_space.shape[0])
+        train_state = create_train_state(
+            network,
+            env.observation_size,
+            seed=args.seed,
+            learning_rate=3e-4,
+        )
     if args.checkpoint:
-        train_state = load_checkpoint(Path(args.checkpoint), train_state)
+        if ppo_policy is None:
+            train_state = load_checkpoint(Path(args.checkpoint), train_state)
         args.mode = "checkpoint"
 
     def copy_state_to_mujoco() -> None:
@@ -68,6 +78,8 @@ def main(argv: list[str] | None = None) -> int:
         state_box["key"], action_key = jax.random.split(state_box["key"])
         if args.mode == "random":
             action = jax.random.uniform(action_key, (env.action_space.shape[0],), minval=-1.0, maxval=1.0)
+        elif ppo_policy is not None:
+            action = ppo_policy(state_box["state"].obs, action_key)[0]
         else:
             action = select_action(train_state, state_box["state"].obs)
         state_box["state"] = env.step(state_box["state"], action)

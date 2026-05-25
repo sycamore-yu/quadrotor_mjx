@@ -7,7 +7,9 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import yaml
 
 _xla_flags = os.environ.get("XLA_FLAGS", "")
@@ -82,6 +84,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.config:
         config = yaml.safe_load(Path(args.config).read_text()) or {}
 
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{args.env}_{args.algo}_seed{args.seed}"
+    checkpoint_path = output_dir / f"{stem}.ckpt"
+    metrics_path = output_dir / f"{stem}_metrics.json"
+    if args.algo == "ppo":
+        config.setdefault("checkpoint_dir", str((output_dir / f"{stem}_checkpoints").resolve()))
+        if args.num_timesteps is not None:
+            config.setdefault("num_timesteps", args.num_timesteps)
+
     env = NormalizeActionWrapper(load(args.env))
     network = make_network(args.algo, env.action_space.shape[0])
 
@@ -106,20 +118,34 @@ def main(argv: list[str] | None = None) -> int:
         **config,
     )
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{args.env}_{args.algo}_seed{args.seed}"
-    checkpoint_path = output_dir / f"{stem}.ckpt"
-    metrics_path = output_dir / f"{stem}_metrics.json"
-
     if result.train_state is not None:
         save_checkpoint(checkpoint_path, result.train_state)
-    metrics_path.write_text(json.dumps(result.metrics, indent=2, sort_keys=True))
+    metrics_path.write_text(json.dumps(_jsonable(result.metrics), indent=2, sort_keys=True))
 
-    print(f"Checkpoint: {checkpoint_path}")
+    print(f"Checkpoint: {result.checkpoint_path or checkpoint_path}")
     print(f"Metrics: {metrics_path}")
-    print(f"Mean reward: {result.metrics['mean_reward']:.6f}")
+    mean_reward = result.metrics.get("mean_reward")
+    if isinstance(mean_reward, (int, float)) and np.isfinite(mean_reward):
+        print(f"Mean reward: {mean_reward:.6f}")
+    else:
+        print("Mean reward: n/a (evaluation disabled for this run)")
     return 0
+
+
+def _jsonable(value: Any) -> Any:
+    import jax
+
+    if isinstance(value, jax.Array):
+        value = np.asarray(value)
+    if isinstance(value, np.ndarray):
+        return value.item() if value.ndim == 0 else value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
 
 
 if __name__ == "__main__":

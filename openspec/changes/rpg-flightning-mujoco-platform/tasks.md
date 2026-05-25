@@ -40,7 +40,7 @@
 ## 4. Algorithms
 
 - [ ] 4.1 Implement `algorithms/bptt.py` with JAX rollout, policy update, checkpointing, and metrics.
-- [ ] 4.2 Implement `algorithms/ppo.py` or a clean Brax PPO adapter.
+- [x] 4.2 Implement `algorithms/ppo.py` or a clean Brax PPO adapter.
 - [ ] 4.3 Implement `algorithms/shac.py` as clean wrapper around `third_party/jax_shac`, without runtime monkey patches.
 - [x] 4.4 Add common trainer interface:
   - `train(config) -> TrainResult`

@@ -80,6 +80,23 @@ train-jax-shac --env_name forest_navigation --smoke
 The console scripts are registered in `pyproject.toml` as `dva_quadrotor_mjx.learning.*:run` entry points, matching the same pattern as MuJoCo Playground's `train-jax-ppo = "learning.train_jax_ppo:run"`.
 APG is folded into the BPTT track, so the public training matrix is `bptt`, `ppo`, and `shac`.
 
+PPO uses the MuJoCo Playground-style chain: `envs.registry.load(...)`, `dva_quadrotor_mjx.wrapper.wrap_for_brax_training`, and Brax PPO's vectorized trainer. BPTT and SHAC still use the current baseline rollout path until their dedicated algorithm tasks are completed.
+
+Why this is explicit: earlier implementation work only aligned the console-script naming, package entry points, output directories, and smoke checks. It did not use Playground's actual vectorized trainer path, so it was a temporary baseline rollout rather than full training parity. This is now corrected for PPO; BPTT and SHAC remain documented follow-up work instead of being presented as Playground-parity trainers.
+
+Default console runs are intentionally short:
+
+```bash
+train-jax-bptt --env quadrotor_hover
+```
+
+That command runs `1 epoch / 1 step / 1 env` so CLI and MJX compilation can be checked quickly. Use `--full` for the normal baseline defaults:
+
+```bash
+train-jax-bptt --env quadrotor_hover --full
+# epochs=100 steps=1000 num_envs=128
+```
+
 ### 3x3 Scene Matrix
 
 ```bash

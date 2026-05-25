@@ -53,6 +53,7 @@ The platform SHALL provide three scene tasks: `hover_obstacle`, `gate_crossing`,
 ### Requirement: Three Algorithm Training Matrix
 The platform SHALL support `bptt`, `ppo`, and `shac` training through one common CLI.
 APG SHALL be treated as folded into the BPTT track and SHALL NOT be exposed as a separate public training command for this platform change.
+PPO SHALL use the MuJoCo Playground-style training chain: registry-loaded environment, `wrap_for_brax_training`, and Brax PPO vectorized trainer. BPTT and SHAC MAY remain on baseline rollout adapters until their dedicated algorithm tasks are completed, but documentation and metrics SHALL identify that status explicitly.
 
 #### Scenario: Smoke Training Matrix
 - **GIVEN** `scripts/train.py` supports `--env`, `--algo`, and `--smoke`
