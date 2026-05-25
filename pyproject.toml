@@ -9,15 +9,27 @@ description = "MJX quadrotor research platform for SHAC and D.VA experiments."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "brax>=0.12",
+  "chex>=0.1",
+  "flax>=0.10",
+  "imageio>=2.34",
   "jax>=0.6",
   "mujoco>=3.6",
   "mujoco-mjx>=3.6",
   "numpy>=1.26",
+  "optax>=0.2",
+  "pyyaml>=6.0",
 ]
 
-[tool.setuptools]
-package-dir = { "" = "src", "jax_shac" = "third_party/jax_shac", "flightning" = "third_party/rpg_flightning/flightning", "mjviser" = "third_party/mjviser/src/mjviser" }
-packages = ["dva_quadrotor_mjx", "jax_shac", "flightning", "mjviser"]
+[project.scripts]
+train-jax-bptt = "dva_quadrotor_mjx.learning.train_jax_bptt:run"
+train-jax-ppo = "dva_quadrotor_mjx.learning.train_jax_ppo:run"
+train-jax-shac = "dva_quadrotor_mjx.learning.train_jax_shac:run"
+play-dva-quadrotor = "dva_quadrotor_mjx.learning.play:run"
+
+[tool.setuptools.packages.find]
+where = ["src", "third_party/jax_shac", "third_party/rpg_flightning", "third_party/mjviser/src"]
+include = ["dva_quadrotor_mjx*", "jax_shac*", "envs*", "shac*", "utils*", "flightning*", "mjviser*"]
 
 [tool.setuptools.package-data]
 dva_quadrotor_mjx = ["envs/xmls/*.xml"]

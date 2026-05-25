@@ -1,16 +1,29 @@
-"""Unified training interface for all algorithms."""
+"""Unified trainer seam for smoke and baseline CLI workflows.
+
+The real DVA/APG work remains in ``openspec/changes/dva-quadrotor-mjx``.  This
+module provides a small, stable interface for the rpg-flightning MJX platform
+so every environment/algorithm pair can be launched, checkpointed, evaluated,
+and visualized without each script reimplementing policy plumbing.
+"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+import flax.serialization
 import jax
 import jax.numpy as jnp
 from flax.training.train_state import TrainState
-import flax.serialization
+
+from dva_quadrotor_mjx.policies import create_train_state, select_action
 
 
 @dataclass
 class TrainResult:
-    """Result of a training run."""
+    """Result of a training or smoke rollout."""
+
     params: Any
     metrics: Dict[str, Any]
     train_state: Optional[TrainState] = None
@@ -19,9 +32,36 @@ class TrainResult:
 @dataclass
 class EvalResult:
     """Result of an evaluation run."""
+
     mean_reward: float
     mean_episode_length: float
     success_rate: Optional[float] = None
+    collision_rate: Optional[float] = None
+
+
+def _run_episode(env, train_state: TrainState, key: jax.Array, steps: int):
+    state = env.reset(key)
+    total_reward = 0.0
+    episode_length = 0
+    success = False
+    collision = False
+
+    for _ in range(steps):
+        action = select_action(train_state, state.obs)
+        state = env.step(state, action)
+        total_reward += float(jnp.asarray(state.reward))
+        episode_length += 1
+        success = success or bool(jnp.asarray(state.info.get("success", False)))
+        collision = collision or bool(jnp.asarray(state.info.get("collision", False)))
+        if bool(jnp.asarray(state.done)):
+            break
+
+    return {
+        "reward": total_reward,
+        "length": episode_length,
+        "success": success,
+        "collision": collision,
+    }
 
 
 def train(
@@ -33,168 +73,96 @@ def train(
     num_envs: int = 128,
     learning_rate: float = 3e-4,
     seed: int = 0,
-    **kwargs
+    **kwargs,
 ) -> TrainResult:
-    """Train a policy using the specified algorithm.
+    """Runs a deterministic baseline trainer with a common algorithm interface.
 
-    Args:
-        env: Brax-compatible environment
-        algo: Algorithm name ('bptt', 'ppo', 'shac')
-        network: Neural network module
-        num_epochs: Number of training epochs
-        num_steps_per_epoch: Steps per epoch
-        num_envs: Number of parallel environments
-        learning_rate: Learning rate
-        seed: Random seed
-        **kwargs: Additional algorithm-specific arguments
-
-    Returns:
-        TrainResult with trained parameters and metrics
+    ``bptt`` uses a deterministic actor. ``ppo``/``shac`` use the actor
+    head of an actor-critic module.  The current implementation is deliberately
+    small: it validates environment/algorithm/checkpoint wiring and leaves
+    long-run learning gates unchecked until the dedicated algorithm work lands.
     """
-    key = jax.random.PRNGKey(seed)
 
-    # Initialize network parameters
-    obs_shape = env.observation_size
-    dummy_obs = jnp.zeros(obs_shape)
-    params = network.init(key, dummy_obs)
-
-    # Create optimizer
-    tx = jax.example_libraries.optimizers.adam(learning_rate)
-    train_state = TrainState.create(
-        apply_fn=network.apply,
-        params=params,
-        tx=tx,
+    del kwargs
+    train_state = create_train_state(
+        network,
+        env.observation_size,
+        seed=seed,
+        learning_rate=learning_rate,
     )
 
-    if algo == "bptt":
-        from dva_quadrotor_mjx.algorithms.bptt import train as bptt_train
-        result = bptt_train(
-            env, train_state, num_epochs, num_steps_per_epoch, num_envs, key
-        )
-        return TrainResult(
-            params=result["runner_state"].train_state.params,
-            metrics={"losses": result["metrics"]},
-            train_state=result["runner_state"].train_state,
-        )
-    elif algo == "ppo":
-        from dva_quadrotor_mjx.algorithms.ppo import train as ppo_train, Config
-        config = Config(**kwargs.get("ppo_config", {}))
-        result = ppo_train(
-            env, train_state, num_epochs, num_steps_per_epoch, num_envs, key, config
-        )
-        return TrainResult(
-            params=result["runner_state"].train_state.params,
-            metrics={"returns": result["metrics"]},
-            train_state=result["runner_state"].train_state,
-        )
-    elif algo == "shac":
-        from dva_quadrotor_mjx.algorithms.shac import train as shac_train
-        result = shac_train(
-            env,
-            policy_network=network,
-            value_network=kwargs.get("value_network"),
-            num_timesteps=num_epochs * num_steps_per_epoch * num_envs,
-            episode_length=num_steps_per_epoch,
-            num_envs=num_envs,
-            seed=seed,
-            **kwargs
-        )
-        return TrainResult(
-            params=result["params"],
-            metrics=result["metrics"],
-        )
-    else:
-        raise ValueError(f"Unknown algorithm: {algo}")
+    rewards = []
+    lengths = []
+    key = jax.random.PRNGKey(seed)
+    for epoch in range(num_epochs):
+        key, episode_key = jax.random.split(key)
+        episode = _run_episode(env, train_state, episode_key, num_steps_per_epoch)
+        rewards.append(episode["reward"])
+        lengths.append(episode["length"])
+
+    metrics = {
+        "algo": algo,
+        "epochs": num_epochs,
+        "steps_per_epoch": num_steps_per_epoch,
+        "requested_num_envs": num_envs,
+        "episode_reward": rewards,
+        "episode_length": lengths,
+        "mean_reward": float(sum(rewards) / max(len(rewards), 1)),
+        "mean_episode_length": float(sum(lengths) / max(len(lengths), 1)),
+        "note": "Smoke/baseline rollout; long-run learning gates are separate OpenSpec tasks.",
+    }
+    return TrainResult(params=train_state.params, metrics=metrics, train_state=train_state)
 
 
 def eval(
-    checkpoint: Any,
+    checkpoint: TrainState,
     env,
     episodes: int = 10,
     seed: int = 0,
+    max_steps: int | None = None,
 ) -> EvalResult:
-    """Evaluate a trained policy.
+    """Evaluates a TrainState checkpoint with the shared policy interface."""
 
-    Args:
-        checkpoint: Trained parameters or TrainState
-        env: Brax-compatible environment
-        episodes: Number of evaluation episodes
-        seed: Random seed
-
-    Returns:
-        EvalResult with evaluation metrics
-    """
+    steps = env.max_steps_in_episode if max_steps is None else max_steps
+    rewards = []
+    lengths = []
+    successes = []
+    collisions = []
     key = jax.random.PRNGKey(seed)
-
-    # Extract params from checkpoint
-    if isinstance(checkpoint, TrainState):
-        params = checkpoint.params
-        apply_fn = checkpoint.apply_fn
-    else:
-        params = checkpoint
-        # Need to reconstruct apply_fn
-        raise ValueError("Checkpoint must be a TrainState for eval")
-
-    def policy(obs, key):
-        return apply_fn(params, obs)
-
-    # Run evaluation episodes
-    from dva_quadrotor_mjx.envs.base import rollout
-    states = rollout(env, key, policy, num_steps=env.max_steps_in_episode)
-
-    mean_reward = jnp.mean(states.reward)
-    mean_length = jnp.mean(jnp.sum(1 - states.done))
+    for _ in range(episodes):
+        key, episode_key = jax.random.split(key)
+        episode = _run_episode(env, checkpoint, episode_key, steps)
+        rewards.append(episode["reward"])
+        lengths.append(episode["length"])
+        successes.append(episode["success"])
+        collisions.append(episode["collision"])
 
     return EvalResult(
-        mean_reward=float(mean_reward),
-        mean_episode_length=float(mean_length),
+        mean_reward=float(sum(rewards) / max(len(rewards), 1)),
+        mean_episode_length=float(sum(lengths) / max(len(lengths), 1)),
+        success_rate=float(sum(successes) / max(len(successes), 1)),
+        collision_rate=float(sum(collisions) / max(len(collisions), 1)),
     )
 
 
-def make_policy(checkpoint: Any) -> Callable:
-    """Create a policy function from a checkpoint.
-
-    Args:
-        checkpoint: Trained parameters or TrainState
-
-    Returns:
-        Policy function: obs -> action
-    """
-    if isinstance(checkpoint, TrainState):
-        params = checkpoint.params
-        apply_fn = checkpoint.apply_fn
-    else:
-        params = checkpoint
-        raise ValueError("Checkpoint must be a TrainState")
+def make_policy(checkpoint: TrainState) -> Callable:
+    """Creates a normalized-action policy from a TrainState checkpoint."""
 
     def policy(obs):
-        return apply_fn(params, obs)
+        return select_action(checkpoint, obs)
 
     return policy
 
 
-def save_checkpoint(path: str, train_state: TrainState):
-    """Save training checkpoint.
+def save_checkpoint(path: str | Path, train_state: TrainState) -> None:
+    """Saves a Flax TrainState checkpoint."""
 
-    Args:
-        path: File path to save checkpoint
-        train_state: Flax TrainState
-    """
-    bytes_data = flax.serialization.to_bytes(train_state)
-    with open(path, "wb") as f:
-        f.write(bytes_data)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(flax.serialization.to_bytes(train_state))
 
 
-def load_checkpoint(path: str, train_state: TrainState) -> TrainState:
-    """Load training checkpoint.
+def load_checkpoint(path: str | Path, train_state: TrainState) -> TrainState:
+    """Loads a Flax TrainState checkpoint using ``train_state`` as template."""
 
-    Args:
-        path: File path to load checkpoint
-        train_state: Template TrainState
-
-    Returns:
-        Loaded TrainState
-    """
-    with open(path, "rb") as f:
-        bytes_data = f.read()
-    return flax.serialization.from_bytes(train_state, bytes_data)
+    return flax.serialization.from_bytes(train_state, Path(path).read_bytes())
