@@ -48,7 +48,7 @@ The platform SHALL provide three scene tasks: `hover_obstacle`, `gate_crossing`,
 - **GIVEN** the `forest_navigation` environment is registered
 - **WHEN** the environment is reset with a fixed seed
 - **THEN** tree/cylinder obstacle placement SHALL be deterministic
-- **AND** rangefinder readings SHALL reflect obstacle distance for at least one controlled geometry case
+- **AND** rangefinder readings SHALL reflect obstacle distance for a controlled geometry case
 
 ### Requirement: Three Algorithm Training Matrix
 The platform SHALL support `bptt`, `ppo`, and `shac` training through one common CLI.
@@ -65,9 +65,28 @@ Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for a
 - **AND** each run SHALL write metrics and a checkpoint or explicit smoke artifact
 
 #### Scenario: Baseline Learning Signal
-- **GIVEN** a non-smoke training config for `hover_state`
-- **WHEN** training `bptt`, `ppo`, and `shac` for the configured short-run budget
-- **THEN** each algorithm SHALL improve evaluation reward over the initial policy for at least two fixed seeds
+- **GIVEN** a non-smoke training config for each acceptance env (`hover_state`, `hover_obstacle`, `gate_crossing`, and `forest_navigation`)
+- **WHEN** training `bptt`, `ppo`, and `shac` for the configured acceptance budget
+- **THEN** every algorithm-env pair SHALL improve evaluation reward over the initial policy for two fixed training seeds
+- **AND** every scene algorithm-env pair SHALL beat its random-policy baseline on the scene primary metric
+
+#### Scenario: Reward Improvement Gate Calculation
+- **GIVEN** an algorithm-env pair is evaluated for delivery
+- **WHEN** the gate runner starts
+- **THEN** it SHALL evaluate the untrained initial policy and random-policy baseline on the same fixed evaluation seeds used for the trained checkpoint
+- **AND** it SHALL run non-smoke training for the fixed acceptance budget declared in config
+- **AND** it SHALL evaluate the final checkpoint with `scripts/eval.py`
+- **AND** it SHALL pass when `final_mean_reward - initial_mean_reward` meets or exceeds the configured `min_reward_delta`
+- **AND** it SHALL pass when the scene primary metric meets or exceeds the configured scene threshold
+- **AND** it SHALL write the baseline metrics, final metrics, thresholds, seeds, checkpoint path, and pass/fail result to the metrics artifact
+
+#### Scenario: Scene Non-Random Behavior Matrix
+- **GIVEN** the scene envs are `hover_obstacle`, `gate_crossing`, and `forest_navigation`
+- **WHEN** running acceptance training for `bptt`, `ppo`, and `shac`
+- **THEN** all nine scene algorithm-env pairs SHALL beat their random-policy baselines
+- **AND** `hover_obstacle` SHALL report target-distance improvement and collision or clearance metrics
+- **AND** `gate_crossing` SHALL report waypoint/gate progress and collision metrics
+- **AND** `forest_navigation` SHALL report goal-progress, tree-collision, and rangefinder-clearance metrics
 
 #### Scenario: No Compromise Algorithm Backend
 - **GIVEN** an algorithm CLI reports success for `bptt`, `ppo`, or `shac`
@@ -77,11 +96,11 @@ Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for a
 
 #### Scenario: Backend Completion Contract
 - **GIVEN** an algorithm is claimed complete for this change
-- **WHEN** running its non-smoke training command on `hover_state`
+- **WHEN** running its non-smoke training command on every acceptance env
 - **THEN** the command SHALL write metrics with the concrete backend name
 - **AND** it SHALL write a reloadable checkpoint
 - **AND** the checkpoint SHALL work with `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor`
-- **AND** the run SHALL pass the configured short-run reward-improvement gate
+- **AND** the run SHALL pass the configured reward-improvement gate
 - **AND** a smoke-only CLI run SHALL NOT satisfy backend completion
 
 ### Requirement: Evaluation, Rendering, And mjviser Visualization

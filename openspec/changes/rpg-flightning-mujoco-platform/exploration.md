@@ -12,7 +12,7 @@
 ## Assumptions
 
 - 目标是做后续论文的长期实验平台，不是最短时间复刻 `rpg_flightning` 论文。
-- “复现 SHAC baseline” 默认至少包含 `state-based SHAC`。
+- “复现 SHAC baseline” 在本变更中指 `state-based SHAC` 加上本提案定义的三场景训练验收矩阵。
 - 如果你说的 baseline 指的是 `pixel-based SHAC`，那是单独的高风险项，不应和 state baseline 混在一起推进。
 - 优先级应是：统一动力学平台 > 统一任务定义 > 统一观测接口 > 最大化复用旧代码。
 
@@ -584,4 +584,3 @@ Playground README 直接说明：
 
 - Context7 `MuJoCo` library lookup: `/google-deepmind/mujoco`
 - Context7 `MuJoCo` docs query: MJX 安装、`mujoco.mjx` API、tutorial reset / observation 示例
-

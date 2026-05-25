@@ -64,7 +64,7 @@
 - [ ] 4.9 Add backend completion contract tests for each claimed-complete backend:
   non-smoke training writes concrete backend metrics, writes a reloadable
   checkpoint, works with `eval.py`, `render.py`, and `play-dva-quadrotor`, and
-  passes the short-run reward-improvement gate.
+  passes the configured reward-improvement gate on every acceptance env.
 
 ## 5. CLI Scripts And Configs
 
@@ -106,7 +106,16 @@ Full training gates:
 - [ ] 6.14 `hover_state + bptt` improves eval reward over initial policy for 2 seeds.
 - [ ] 6.15 `hover_state + ppo` improves eval reward over initial policy for 2 seeds.
 - [ ] 6.16 `hover_state + shac` improves eval reward over initial policy for 2 seeds.
-- [ ] 6.17 Each of the three scene envs has at least one algorithm that learns non-random behavior in a short run.
+- [ ] 6.17 `hover_obstacle + bptt` beats random-policy baseline on target-distance and collision/clearance metrics.
+- [ ] 6.18 `hover_obstacle + ppo` beats random-policy baseline on target-distance and collision/clearance metrics.
+- [ ] 6.19 `hover_obstacle + shac` beats random-policy baseline on target-distance and collision/clearance metrics.
+- [ ] 6.20 `gate_crossing + bptt` beats random-policy baseline on waypoint/gate progress and collision metrics.
+- [ ] 6.21 `gate_crossing + ppo` beats random-policy baseline on waypoint/gate progress and collision metrics.
+- [ ] 6.22 `gate_crossing + shac` beats random-policy baseline on waypoint/gate progress and collision metrics.
+- [ ] 6.23 `forest_navigation + bptt` beats random-policy baseline on goal-progress, tree-collision, and rangefinder-clearance metrics.
+- [ ] 6.24 `forest_navigation + ppo` beats random-policy baseline on goal-progress, tree-collision, and rangefinder-clearance metrics.
+- [ ] 6.25 `forest_navigation + shac` beats random-policy baseline on goal-progress, tree-collision, and rangefinder-clearance metrics.
+- [ ] 6.26 Implement the gate runner that records fixed train/eval seeds, initial/random baseline metrics, final checkpoint metrics, thresholds, checkpoint path, and pass/fail result.
 
 ## 7. Visualization And Replay
 

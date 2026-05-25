@@ -52,8 +52,8 @@ mistaken for completed work.
 - Sensor configs for state-only, feature, rangefinder, RGB/depth modes remain
   incomplete.
 - Full learning gates are not complete:
-  `hover_state + bptt`, `hover_state + ppo`, `hover_state + shac`, and at least
-  one successful short-run learner for each scene env.
+  all `bptt`, `ppo`, and `shac` combinations across `hover_state`,
+  `hover_obstacle`, `gate_crossing`, and `forest_navigation`.
 - Three mjviser scene commands are not yet verified as final acceptance.
 
 ## Delivery Gates
@@ -67,7 +67,7 @@ The change is not ready to archive until all gates below pass:
   - BPTT metrics report `backend="jax_bptt"`
   - PPO metrics report `backend="brax_ppo"`
   - SHAC metrics report `backend="jax_shac"`
-- Full learning gates from `tasks.md` section 6.14 to 6.17
+- Full learning gates from `tasks.md` section 6.14 to 6.26
 - mjviser visualization gates from `tasks.md` section 7.1 to 7.5
 - No metric artifact with `backend="smoke_rollout"` may be used as evidence of
   training parity.
@@ -76,15 +76,15 @@ The change is not ready to archive until all gates below pass:
 
 Known compromise patterns and required handling:
 
-- Smoke rollout adapters: allowed only as diagnostics, never as backend
+- Smoke rollout adapters: allowed as diagnostics, never as backend
   completion.
 - DVA/APG placeholders: belong to `openspec/changes/dva-quadrotor-mjx`; they
   must not be counted as implemented algorithms in this change.
 - RGB/depth rendering fallback: tests must skip or fail loudly when rendering is
   unavailable; zero images or fake render output are not acceptable.
-- Disabled XML physical collisions: acceptable only when paired with explicit
+- Disabled XML physical collisions: acceptable when paired with explicit
   JAX semantic collision tests and documented scene semantics.
-- Missing ffmpeg/pyav video writer: acceptable only when `render.py` writes a
+- Missing ffmpeg/pyav video writer: acceptable when `render.py` writes a
   documented non-empty frame sequence fallback.
 
 ## Grill Decisions
@@ -99,11 +99,11 @@ What exactly counts as "algorithm backend complete" for this change?
 
 Decision:
 
-An algorithm backend is complete only when its training command produces a
+An algorithm backend is complete when its training command produces a
 metrics artifact with the correct backend name, writes a reloadable checkpoint,
 works with `eval.py`, `render.py`, and `play-dva-quadrotor`, and passes the
-configured short-run reward-improvement gate. A smoke command that only checks
-CLI wiring is not enough.
+configured reward-improvement gate. A smoke command that checks CLI wiring is
+not enough.
 
 Spec updates:
 
@@ -113,21 +113,39 @@ Spec updates:
 
 ### Decision 2: Scene Learning Scope
 
-Status: open
+Status: accepted
 
 Question:
 
-Should a backend be considered complete after `hover_state` learning only, or
-must it also show at least one non-random behavior on each of the three scene
-envs?
+Should a backend be considered complete after `hover_state` learning, or must
+it also show non-random behavior on each of the three scene envs?
 
-Recommended answer:
+Decision:
 
-Backend-specific completion should require `hover_state` reward improvement for
-that backend, while platform-level delivery should require each scene env to
-show non-random behavior with at least one algorithm. Requiring every backend to
-learn every scene before backend completion would block BPTT/SHAC integration on
-scene-specific reward tuning instead of proving the backend is real.
+Every public algorithm (`bptt`, `ppo`, `shac`) must pass the reward-improvement
+gate on `hover_state`, `hover_obstacle`, `gate_crossing`, and
+`forest_navigation`. Every scene algorithm-env pair must beat its random-policy
+baseline on the scene primary metric. The platform is not deliverable while any
+cell in this matrix remains unverified.
+
+### Decision 3: Reward-Improvement Gate
+
+Status: accepted
+
+Question:
+
+What is the concrete reward-improvement gate?
+
+Decision:
+
+For every algorithm-env pair, the gate runner evaluates an untrained initial
+policy and a random-policy baseline on fixed evaluation seeds, trains for the
+configured acceptance budget, reloads the final checkpoint, and evaluates the
+checkpoint on the same evaluation seeds. The pair passes when
+`final_mean_reward - initial_mean_reward >= min_reward_delta` and the scene
+primary metric meets the configured threshold. The metrics artifact must record
+the seeds, thresholds, baseline metrics, final metrics, checkpoint path, and
+pass/fail result.
 
 ## Open Grill Questions
 

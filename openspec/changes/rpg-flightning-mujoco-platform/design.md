@@ -212,10 +212,29 @@ Acceptance:
 
 Backend completion has one shared contract for all algorithms. A backend is not
 complete because its CLI starts or because smoke rollout writes metrics. It is
-complete only when non-smoke training writes backend-identifying metrics,
+complete when non-smoke training writes backend-identifying metrics,
 produces a reloadable checkpoint, works through eval/render/mjviser play, and
-passes the short-run reward-improvement gate. This prevents "pending real
+passes the configured reward-improvement gate. This prevents "pending real
 trainer" from being treated as Playground parity.
+
+The reward-improvement gate is implemented by an acceptance runner:
+
+- Evaluate the untrained initial policy and random-policy baseline on fixed
+  evaluation seeds.
+- Run non-smoke training for the configured acceptance budget.
+- Reload the final checkpoint and evaluate it with `scripts/eval.py` on the same
+  evaluation seeds.
+- Pass the algorithm-env pair when reward delta and the scene primary metric
+  meet the configured thresholds.
+- Record backend name, seeds, thresholds, baseline metrics, final metrics,
+  checkpoint path, and pass/fail result in the metrics artifact.
+
+All public algorithms must pass this gate for `hover_state`, `hover_obstacle`,
+`gate_crossing`, and `forest_navigation`. Scene behavior is judged against a
+random-policy baseline on env-specific metrics: target distance plus
+collision/clearance for `hover_obstacle`, waypoint/gate progress plus collision
+for `gate_crossing`, and goal progress plus tree-collision/rangefinder-clearance
+for `forest_navigation`.
 
 #### BPTT
 
@@ -243,7 +262,7 @@ Acceptance:
 - `scripts/train.py --algo bptt --env hover_obstacle --smoke` no error.
 - `scripts/train.py --algo bptt --env gate_crossing --smoke` no error.
 - `scripts/train.py --algo bptt --env forest_navigation --smoke` no error.
-- Full run improves evaluation reward by a configured minimum over initial policy for at least 2 fixed seeds.
+- Full run improves evaluation reward by a configured minimum over initial policy for two fixed seeds.
 - Metrics artifact includes `backend="jax_bptt"` and does not use smoke-only rollout metrics as a substitute for training.
 
 #### PPO
@@ -264,7 +283,7 @@ Required work:
 
 Implementation note:
 
-- Earlier CLI work aligned naming and smoke checks only; that is not an accepted training backend.
+- Earlier CLI work aligned naming and smoke wiring; that is not an accepted training backend.
 - PPO parity requires Brax PPO plus the vectorized training wrapper chain.
 - BPTT and SHAC parity require their own real backends and backend-identifying metrics; smoke-only rollout artifacts are allowed only as failing diagnostics before implementation is complete.
 
@@ -293,7 +312,7 @@ Required work:
 - Provide stable checkpoint path outside `third_party`.
 - Save checkpoints in a format accepted by `scripts/eval.py`, `scripts/render.py`, and `play-dva-quadrotor`.
 - Report metrics with `backend="jax_shac"`, actor loss, value loss, reward, SPS, compile time, and train time.
-- Add smoke and short-run test modes.
+- Add smoke mode and acceptance-budget training mode.
 
 Acceptance:
 
@@ -331,10 +350,10 @@ Acceptance:
 ## Known Risks
 
 - Documentation scan for compromise designs:
-  - BPTT/SHAC smoke rollout adapters exist only as diagnostics and SHALL NOT count as training backend completion.
+  - BPTT/SHAC smoke rollout adapters exist as diagnostics and SHALL NOT count as training backend completion.
   - DVA/APG placeholders belong to `openspec/changes/dva-quadrotor-mjx` and SHALL NOT be promoted as implemented algorithms in this change.
   - RGB/depth rendering availability remains an explicit capability check; tests SHALL skip or fail loudly rather than substituting fake zero images.
-  - Scene XML physical collision disablement is accepted only with matching JAX semantic collision tests.
+  - Scene XML physical collision disablement is accepted when matching JAX semantic collision tests exist.
 - MJX/MJWarp rendering is not a dependable differentiable renderer. Use it as observation generation unless a separate differentiable renderer branch is created.
 - SHAC currently depends on ad hoc monkey patches. This must be fixed before claiming production-quality training.
 - `rpg_flightning` feature vision is landmark projection, not RGB/LiDAR. It should be implemented as compatibility mode, not confused with final perception tasks.
