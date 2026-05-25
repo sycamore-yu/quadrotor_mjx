@@ -123,7 +123,9 @@ The platform SHALL provide CLI tools for evaluation, offline rendering, and live
 #### Scenario: Render Checkpoint
 - **GIVEN** a checkpoint produced by `scripts/train.py`
 - **WHEN** running `python scripts/render.py --env <env> --algo <algo> --checkpoint <path> --output artifacts/render.mp4`
-- **THEN** the command SHALL produce a non-empty video or documented frame sequence
+- **THEN** the command SHALL produce a non-empty `.mp4` video
+- **AND** `.npz` frame sequences or image-directory frame dumps SHALL NOT satisfy render acceptance
+- **AND** missing video encoder dependencies SHALL fail loudly with a documented error rather than silently downgrading the artifact
 
 #### Scenario: Visualize Scene With mjviser
 - **GIVEN** `mjviser` is installed in the active environment

@@ -126,7 +126,7 @@ play-dva-quadrotor --env hover_obstacle --mode scene --port 8080
 play-dva-quadrotor --env gate_crossing --mode random --steps 500 --port 8081
 play-dva-quadrotor --env forest_navigation --mode checkpoint --algo shac --checkpoint artifacts/forest_navigation_shac_seed0.ckpt --steps 500 --port 8082
 
-# Offline frames/video
+# Offline MP4 video
 python scripts/render.py --env hover_obstacle --algo bptt --checkpoint artifacts/hover_obstacle_bptt_seed0.ckpt --output artifacts/hover_obstacle.mp4 --steps 200
 ```
 

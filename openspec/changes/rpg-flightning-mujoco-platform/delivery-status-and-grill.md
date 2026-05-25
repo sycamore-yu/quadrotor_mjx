@@ -86,8 +86,9 @@ Known compromise patterns and required handling:
   unavailable; zero images or fake render output are not acceptable.
 - Disabled XML physical collisions: acceptable when paired with explicit
   JAX semantic collision tests and documented scene semantics.
-- Missing ffmpeg/pyav video writer: acceptable when `render.py` writes a
-  documented non-empty frame sequence fallback.
+- Missing ffmpeg/pyav video writer: not acceptable for final render acceptance.
+  `render.py` must write a non-empty `.mp4` or fail loudly with a documented
+  encoder dependency error.
 
 ## Grill Decisions
 
@@ -212,7 +213,30 @@ Spec updates:
 - `tasks.md` now requires the adapted backend to live in
   `src/dva_quadrotor_mjx/algorithms/shac.py`.
 
+### Decision 6: Render Acceptance Artifact
+
+Status: accepted
+
+Question:
+
+Should render/video acceptance require ffmpeg-backed `.mp4`, or is a non-empty
+`.npz` frame sequence acceptable on headless machines?
+
+Decision:
+
+Final render acceptance SHALL require a non-empty `.mp4` video artifact. A
+non-empty `.npz` frame sequence, image directory, or other frame dump is not an
+acceptable substitute for this change. If the headless server lacks the required
+video writer, `render.py` must fail loudly with a clear encoder dependency
+error; it must not silently downgrade the evidence artifact.
+
+Spec updates:
+
+- `spec.md` now requires `scripts/render.py` to produce a non-empty `.mp4`
+  video and explicitly disallows `.npz` frame sequence fallback.
+- `design.md` now records MP4 as the render artifact contract.
+- `README.md` now labels the render command as an MP4 video path.
+
 ## Open Grill Questions
 
-- Should render/video acceptance require ffmpeg-backed `.mp4`, or is a non-empty
-  `.npz` frame sequence acceptable on headless machines?
+None.

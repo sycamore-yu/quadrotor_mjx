@@ -137,9 +137,9 @@ graph TD
 - Differentiability honesty: state and feature observations can participate in
   differentiable training; rangefinder/RGB/depth boundaries must be explicit
   stop-gradient or non-differentiable observation paths.
-- Artifact isolation: generated checkpoints, metrics, videos, and frame
-  sequences must live under `artifacts/` or a configured output directory, never
-  under `third_party/`.
+- Artifact isolation: generated checkpoints, metrics, and MP4 videos must live
+  under `artifacts/` or a configured output directory, never under
+  `third_party/`.
 - Operational debuggability: every user-facing train command must have matching
   eval, render, and mjviser play paths for the produced checkpoint.
 
@@ -439,7 +439,7 @@ Acceptance:
 - `scripts/train.py --env hover_obstacle --algo bptt --smoke` no error.
 - `scripts/train.py --env hover_obstacle --algo ppo --smoke` no error.
 - `scripts/train.py --env hover_obstacle --algo shac --smoke` no error.
-- `scripts/render.py --env hover_obstacle --random-policy --steps 200 --output artifacts/hover_obstacle.mp4` produces non-empty video or mjviser trajectory.
+- `scripts/render.py --env hover_obstacle --random-policy --steps 200 --output artifacts/hover_obstacle.mp4` produces a non-empty MP4 video.
 
 #### 2. gate_crossing
 
