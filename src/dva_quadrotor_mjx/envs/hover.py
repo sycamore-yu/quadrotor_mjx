@@ -242,6 +242,7 @@ class HoveringStateEnv(MjxEnv):
             "last_actions": last_actions,
             "motor_force": motor_force,
             "collision": jnp.array(False),
+            "target_distance": jnp.linalg.norm(p - self.goal),
         }
 
         obs = self._get_obs(data, info)
@@ -249,6 +250,7 @@ class HoveringStateEnv(MjxEnv):
         done = jnp.zeros(())
         metrics = {
             "pos_error": jnp.linalg.norm(p - self.goal),
+            "target_distance": jnp.linalg.norm(p - self.goal),
             "vel_norm": jnp.linalg.norm(v),
             "reward": reward,
         }
@@ -384,12 +386,14 @@ class HoveringStateEnv(MjxEnv):
             },
             "last_actions": last_actions,
             "motor_force": motor_force_new,
+            "target_distance": jnp.linalg.norm(p - self.goal),
         })
 
         obs = self._get_obs(data, info)
 
         metrics = {
             "pos_error": jnp.linalg.norm(p - self.goal),
+            "target_distance": jnp.linalg.norm(p - self.goal),
             "vel_norm": jnp.linalg.norm(v),
             "reward": reward,
         }

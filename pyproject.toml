@@ -57,7 +57,7 @@ packages = [
 ]
 
 [tool.setuptools.package-data]
-dva_quadrotor_mjx = ["envs/xmls/*.xml", "configs/algorithms/*.yaml", "configs/tasks/*.yaml"]
+dva_quadrotor_mjx = ["envs/xmls/*.xml", "configs/algorithms/*.yaml", "configs/tasks/*.yaml", "configs/acceptance_runs/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

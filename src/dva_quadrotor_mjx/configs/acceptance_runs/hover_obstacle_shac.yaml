@@ -1,0 +1,30 @@
+env: hover_obstacle
+algo: shac
+train_seeds: [0, 1]
+eval_seeds: [100, 101]
+num_epochs: 10
+num_steps_per_epoch: 160
+num_envs: 128
+learning_rate: 0.001
+eval_episodes: 2
+output_dir: artifacts/acceptance_results/hover_obstacle/shac
+thresholds:
+  min_reward_delta: 0.05
+  primary_metric_name: target_distance
+  primary_metric_direction: min
+  primary_metric_threshold: 3.0
+  primary_metric_vs_random_delta: 0.0
+  additional_metrics:
+    - name: obstacle_clearance
+      direction: max
+      threshold: 0.05
+      vs_random_delta: 0.0
+    - name: collision
+      direction: min
+      threshold: 0.5
+      vs_random_delta: 0.0
+train_kwargs:
+  unroll_length: 16
+  critic_epochs: 8
+  critic_batch_size: 128
+  num_eval_envs: 32

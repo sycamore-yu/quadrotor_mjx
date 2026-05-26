@@ -6,7 +6,8 @@ import mujoco
 from mujoco import mjx
 
 from dva_quadrotor_mjx.envs.hover import HoveringStateEnv
-from dva_quadrotor_mjx.utils.math import smooth_l1
+from dva_quadrotor_mjx.envs.sensors.raycasting import raycast_cylinders
+from dva_quadrotor_mjx.utils.math import quat_to_rot_matrix
 
 
 class ForestNavigationEnv(HoveringStateEnv):
@@ -49,7 +50,7 @@ class ForestNavigationEnv(HoveringStateEnv):
         self.forest_size = forest_size
 
     def reset(self, rng):
-        key_p, key_R, key_v, key_omega, key_forest = jax.random.split(rng, 5)
+        key_forest = jax.random.split(rng, 5)[4]
 
         # Generate forest obstacles
         tree_positions = jax.random.uniform(
@@ -78,10 +79,18 @@ class ForestNavigationEnv(HoveringStateEnv):
         info["start"] = start
         info["collision"] = jnp.array(False)
         info["success"] = jnp.array(False)
-        info["dist_to_goal"] = jnp.linalg.norm(state.pipeline_state.qpos[0:3] - goal)
+        dist_to_goal = jnp.linalg.norm(state.pipeline_state.qpos[0:3] - goal)
+        start_distance = jnp.linalg.norm(start - goal)
+        info["dist_to_goal"] = dist_to_goal
+        info["goal_progress"] = 1.0 - dist_to_goal / jnp.maximum(start_distance, 1e-6)
+        info["rangefinder_clearance"] = jnp.array(1.0)
 
         obs = self._get_obs(state.pipeline_state, info)
-        return state.replace(obs=obs, info=info)
+        metrics = dict(state.metrics)
+        metrics["dist_to_goal"] = dist_to_goal
+        metrics["goal_progress"] = info["goal_progress"]
+        metrics["rangefinder_clearance"] = info["rangefinder_clearance"]
+        return state.replace(obs=obs, info=info, metrics=metrics)
 
     def step(self, state, action):
         next_state = super().step(state, action)
@@ -94,10 +103,25 @@ class ForestNavigationEnv(HoveringStateEnv):
         # Distance to goal reward
         dist_to_goal = jnp.linalg.norm(p - goal)
         goal_reward = -0.01 * dist_to_goal
+        start_distance = jnp.linalg.norm(state.info["start"] - goal)
+        goal_progress = 1.0 - dist_to_goal / jnp.maximum(start_distance, 1e-6)
 
         # Check collision with trees
         dists = jnp.linalg.norm(tree_positions - p, axis=1)
         collided = jnp.any(dists < tree_radii + 0.1)
+
+        quat = next_state.pipeline_state.qpos[3:7]
+        R = quat_to_rot_matrix(quat)
+        pos_2d = p[0:2]
+        dir_world = R[:, 0]
+        dir_2d = dir_world[0:2]
+        dir_2d_norm = dir_2d / jnp.maximum(jnp.linalg.norm(dir_2d), 1e-6)
+        rangefinder_clearance = raycast_cylinders(
+            pos_2d,
+            dir_2d_norm,
+            tree_positions,
+            tree_radii,
+        )
 
         collision_penalty = jax.lax.select(
             collided,
@@ -117,9 +141,16 @@ class ForestNavigationEnv(HoveringStateEnv):
         info["collision"] = collided
         info["success"] = success
         info["dist_to_goal"] = dist_to_goal
+        info["goal_progress"] = goal_progress
+        info["rangefinder_clearance"] = rangefinder_clearance
+        metrics = dict(next_state.metrics)
+        metrics["dist_to_goal"] = dist_to_goal
+        metrics["goal_progress"] = goal_progress
+        metrics["rangefinder_clearance"] = rangefinder_clearance
 
         return next_state.replace(
             reward=reward,
             done=done,
-            info=info
+            info=info,
+            metrics=metrics,
         )

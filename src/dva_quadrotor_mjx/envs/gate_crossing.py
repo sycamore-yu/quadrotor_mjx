@@ -62,7 +62,11 @@ class GateCrossingEnv(HoveringStateEnv):
         info["gates_crossed"] = jnp.array(0, dtype=jnp.int32)
         info["gate_success"] = jnp.array(False)
         info["collision"] = jnp.array(False)
-        return state.replace(info=info)
+        info["gate_progress"] = jnp.array(0.0)
+        metrics = dict(state.metrics)
+        metrics["gate_progress"] = jnp.array(0.0)
+        metrics["gates_crossed"] = jnp.array(0, dtype=jnp.int32)
+        return state.replace(info=info, metrics=metrics)
 
     def step(self, state, action):
         next_state = super().step(state, action)
@@ -113,13 +117,18 @@ class GateCrossingEnv(HoveringStateEnv):
         info["gates_crossed"] = state.info["gates_crossed"] + jnp.where(gate_success, 1, 0)
         info["gate_success"] = gate_success
         info["collision"] = gate_collision
+        info["gate_progress"] = info["gates_crossed"] / float(self.num_gates)
 
         # Done if all gates crossed
         all_crossed = new_gate >= self.num_gates
         done = jnp.where(jnp.logical_or(all_crossed, gate_collision), 1.0, next_state.done)
+        metrics = dict(next_state.metrics)
+        metrics["gate_progress"] = info["gate_progress"]
+        metrics["gates_crossed"] = info["gates_crossed"]
 
         return next_state.replace(
             reward=reward,
             done=done,
-            info=info
+            info=info,
+            metrics=metrics,
         )

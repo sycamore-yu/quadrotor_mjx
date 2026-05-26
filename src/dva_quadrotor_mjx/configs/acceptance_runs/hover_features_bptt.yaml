@@ -1,0 +1,16 @@
+env: hover_features
+algo: bptt
+train_seeds: [0, 1]
+eval_seeds: [100, 101]
+num_epochs: 4
+num_steps_per_epoch: 64
+num_envs: 16
+learning_rate: 0.001
+eval_episodes: 1
+output_dir: artifacts/acceptance_results/hover_features/bptt
+thresholds:
+  min_reward_delta: 0.05
+  primary_metric_name: mean_reward
+  primary_metric_direction: max
+  primary_metric_threshold: -200.0
+  primary_metric_vs_random_delta: 0.0

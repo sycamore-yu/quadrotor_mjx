@@ -1,0 +1,30 @@
+env: forest_navigation
+algo: shac
+train_seeds: [0, 1]
+eval_seeds: [100, 101]
+num_epochs: 12
+num_steps_per_epoch: 200
+num_envs: 128
+learning_rate: 0.001
+eval_episodes: 2
+output_dir: artifacts/acceptance_results/forest_navigation/shac
+thresholds:
+  min_reward_delta: 0.05
+  primary_metric_name: goal_progress
+  primary_metric_direction: max
+  primary_metric_threshold: 0.2
+  primary_metric_vs_random_delta: 0.05
+  additional_metrics:
+    - name: rangefinder_clearance
+      direction: max
+      threshold: 0.05
+      vs_random_delta: 0.0
+    - name: collision
+      direction: min
+      threshold: 0.5
+      vs_random_delta: 0.0
+train_kwargs:
+  unroll_length: 20
+  critic_epochs: 8
+  critic_batch_size: 128
+  num_eval_envs: 32

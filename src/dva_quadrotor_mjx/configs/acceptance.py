@@ -27,6 +27,19 @@ def expected_backend_for_algo(algo: str) -> str:
 
 
 @dataclass(slots=True)
+class AcceptanceMetricGate:
+    """Auxiliary metric gate for non-random scene behaviour checks."""
+
+    name: str
+    direction: str
+    threshold: float
+    vs_random_delta: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class AcceptanceThresholds:
     """Thresholds used by the acceptance gate."""
 
@@ -35,9 +48,12 @@ class AcceptanceThresholds:
     primary_metric_direction: str
     primary_metric_threshold: float
     primary_metric_vs_random_delta: float = 0.0
+    additional_metrics: tuple[AcceptanceMetricGate, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["additional_metrics"] = [gate.to_dict() for gate in self.additional_metrics]
+        return data
 
 
 @dataclass(slots=True)
@@ -167,6 +183,12 @@ def _parse_thresholds(mapping: Mapping[str, Any]) -> AcceptanceThresholds:
     if not isinstance(raw, Mapping):
         raise TypeError(f"thresholds must be a mapping, got {type(raw).__name__}")
 
+    additional_metrics = raw.get("additional_metrics", raw.get("auxiliary_metrics", ()))
+    if not isinstance(additional_metrics, Sequence) or isinstance(
+        additional_metrics, (str, bytes)
+    ):
+        raise TypeError("additional_metrics must be a list of mappings.")
+
     return AcceptanceThresholds(
         min_reward_delta=float(raw.get("min_reward_delta", mapping.get("min_reward_delta", 0.0))),
         primary_metric_name=str(
@@ -183,6 +205,15 @@ def _parse_thresholds(mapping: Mapping[str, Any]) -> AcceptanceThresholds:
                 "primary_metric_vs_random_delta",
                 mapping.get("primary_metric_vs_random_delta", 0.0),
             )
+        ),
+        additional_metrics=tuple(
+            AcceptanceMetricGate(
+                name=str(item["name"]),
+                direction=str(item["direction"]),
+                threshold=float(item["threshold"]),
+                vs_random_delta=float(item.get("vs_random_delta", 0.0)),
+            )
+            for item in additional_metrics
         ),
     )
 
@@ -207,4 +238,3 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
-

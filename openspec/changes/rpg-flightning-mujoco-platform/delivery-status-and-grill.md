@@ -50,6 +50,10 @@ mistaken for completed work.
 - The acceptance gate runner now records seeds, initial/random/final metrics,
   thresholds, checkpoint path, backend, and pass/fail, with tests for stronger
   threshold overrides and artifact validation.
+- Acceptance configs are now checked in under
+  `src/dva_quadrotor_mjx/configs/acceptance_runs/` for the full matrix, and
+  the gate runner now supports additional scene metric gates beyond a single
+  primary metric.
 - Scene task configs now include `state`, `feature`, `rangefinder`, and
   `rgb_depth` sensor mode metadata.
 - Scene deterministic reset tests now cover all three scene envs.
@@ -90,8 +94,15 @@ mistaken for completed work.
   all `bptt`, `ppo`, and `shac` combinations across `hover_state`,
   `hover_obstacle`, `gate_crossing`, and `forest_navigation`, plus
   `hover_features + bptt`.
+- `hover_state + ppo` is now verified by a real acceptance artifact:
+  `artifacts/acceptance_results/hover_state/ppo/hover_state_ppo_acceptance.json`
+  with two train seeds, backend `brax_ppo`, and pass=`true`.
 - Full reward-improvement acceptance matrix remains unverified even though the
   viewer/render/eval command set from section 7 is now exercised successfully.
+- `jax_bptt` acceptance remains the current runtime bottleneck: the real gate
+  reaches XLA slow-compile warnings on `jit_train_epoch`, so the remaining BPTT
+  matrix work is blocked on compile-time optimization rather than render or
+  checkpoint wiring.
 
 ## Delivery Gates
 
@@ -117,6 +128,7 @@ The change is not ready to archive until all gates below pass:
 - `python scripts/visualize_mjviser.py --env forest_navigation --mode random --steps 500 --port 8082`
 - `python scripts/render.py --env hover_obstacle --checkpoint artifacts/hover_obstacle_bptt_seed0.ckpt --output artifacts/hover_obstacle.mp4`
 - `python scripts/eval.py --env gate_crossing --algo shac --checkpoint artifacts/verify_shac_gate/gate_crossing_shac_seed0_checkpoints/checkpoint.pkl --episodes 8`
+- `python scripts/check_acceptance.py --config src/dva_quadrotor_mjx/configs/acceptance_runs/hover_state_ppo.yaml`
 
 ## Compromise Risk Scan
 

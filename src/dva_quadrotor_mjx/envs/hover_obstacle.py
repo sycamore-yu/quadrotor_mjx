@@ -47,16 +47,22 @@ class HoverObstacleEnv(HoveringStateEnv):
     def step(self, state, action):
         next_state = super().step(state, action)
 
-        # Check collision with obstacle (body ID 2 is obstacle)
         p = next_state.pipeline_state.qpos[0:3]
         obstacle_pos = jnp.array([0.0, 0.0, 0.5])
         obstacle_size = jnp.array([0.2, 0.2, 0.5])
+        goal = self.goal
 
-        # Simple box collision check
         dist = jnp.abs(p - obstacle_pos)
         collided = jnp.all(dist < obstacle_size + 0.1)
+        target_distance = jnp.linalg.norm(p - goal)
 
-        # Collision penalty
+        # Signed distance to the obstacle box surface. Positive means clear.
+        inflated = obstacle_size + 0.1
+        q = jnp.abs(p - obstacle_pos) - inflated
+        outside = jnp.linalg.norm(jnp.maximum(q, 0.0))
+        inside = jnp.minimum(jnp.max(q), 0.0)
+        obstacle_clearance = outside + inside
+
         collision_penalty = jax.lax.select(
             collided,
             -10.0,
@@ -67,8 +73,29 @@ class HoverObstacleEnv(HoveringStateEnv):
 
         info = dict(next_state.info)
         info["collision"] = collided
+        info["target_distance"] = target_distance
+        info["obstacle_clearance"] = obstacle_clearance
+        metrics = dict(next_state.metrics)
+        metrics["target_distance"] = target_distance
+        metrics["obstacle_clearance"] = obstacle_clearance
 
         return next_state.replace(
             reward=reward,
-            info=info
+            info=info,
+            metrics=metrics,
         )
+
+    def reset(self, rng):
+        state = super().reset(rng)
+        p = state.pipeline_state.qpos[0:3]
+        obstacle_pos = jnp.array([0.0, 0.0, 0.5])
+        obstacle_size = jnp.array([0.2, 0.2, 0.5]) + 0.1
+        q = jnp.abs(p - obstacle_pos) - obstacle_size
+        outside = jnp.linalg.norm(jnp.maximum(q, 0.0))
+        inside = jnp.minimum(jnp.max(q), 0.0)
+        obstacle_clearance = outside + inside
+        info = dict(state.info)
+        info["obstacle_clearance"] = obstacle_clearance
+        metrics = dict(state.metrics)
+        metrics["obstacle_clearance"] = obstacle_clearance
+        return state.replace(info=info, metrics=metrics)

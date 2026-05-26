@@ -647,8 +647,9 @@ The reward-improvement gate is implemented by an acceptance runner:
 - Run non-smoke training for the configured acceptance budget.
 - Reload the final checkpoint and evaluate it with `scripts/eval.py` on the same
   evaluation seeds.
-- Pass the algorithm-env pair when reward delta and the scene primary metric
-  meet the configured thresholds.
+- Pass the algorithm-env pair when reward delta, the scene primary metric, and
+  every configured additional scene metric gate meet the configured
+  thresholds.
 - Record backend name, seeds, thresholds, baseline metrics, final metrics,
   checkpoint path, and pass/fail result in the metrics artifact.
 
@@ -658,6 +659,11 @@ random-policy baseline on env-specific metrics: target distance plus
 collision/clearance for `hover_obstacle`, waypoint/gate progress plus collision
 for `gate_crossing`, and goal progress plus tree-collision/rangefinder-clearance
 for `forest_navigation`.
+
+Acceptance configs live under
+`src/dva_quadrotor_mjx/configs/acceptance_runs/*.yaml`. Each config declares the
+fixed training budget, seed set, reward delta gate, one primary metric gate,
+and zero or more additional scene metric gates.
 
 #### BPTT
 

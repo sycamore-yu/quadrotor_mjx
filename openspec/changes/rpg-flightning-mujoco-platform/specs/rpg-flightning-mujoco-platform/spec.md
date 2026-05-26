@@ -116,6 +116,7 @@ Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for a
 - **AND** it SHALL evaluate the final checkpoint with `scripts/eval.py`
 - **AND** it SHALL pass when `final_mean_reward - initial_mean_reward` meets or exceeds the configured `min_reward_delta`
 - **AND** it SHALL pass when the scene primary metric meets or exceeds the configured scene threshold
+- **AND** it SHALL pass every configured additional scene metric gate declared in acceptance config, including direction, threshold, and delta-vs-random semantics
 - **AND** it SHALL write the baseline metrics, final metrics, thresholds, seeds, checkpoint path, and pass/fail result to the metrics artifact
 
 #### Scenario: Scene Non-Random Behavior Matrix
@@ -125,6 +126,7 @@ Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for a
 - **AND** `hover_obstacle` SHALL report target-distance improvement and collision or clearance metrics
 - **AND** `gate_crossing` SHALL report waypoint/gate progress and collision metrics
 - **AND** `forest_navigation` SHALL report goal-progress, tree-collision, and rangefinder-clearance metrics
+- **AND** those scene metrics SHALL be machine-checked by the acceptance runner rather than left as reviewer-only interpretation
 
 #### Scenario: No Compromise Algorithm Backend
 - **GIVEN** an algorithm CLI reports success for `bptt`, `ppo`, or `shac`

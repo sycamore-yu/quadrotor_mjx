@@ -1,5 +1,6 @@
 from dva_quadrotor_mjx.configs.acceptance import (
     AcceptanceConfig,
+    AcceptanceMetricGate,
     AcceptanceThresholds,
     EXPECTED_BACKENDS,
     apply_threshold_overrides,
@@ -9,6 +10,7 @@ from dva_quadrotor_mjx.configs.acceptance import (
 
 __all__ = [
     "AcceptanceConfig",
+    "AcceptanceMetricGate",
     "AcceptanceThresholds",
     "EXPECTED_BACKENDS",
     "apply_threshold_overrides",

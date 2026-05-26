@@ -1,0 +1,21 @@
+env: hover_state
+algo: shac
+train_seeds: [0, 1]
+eval_seeds: [100, 101]
+num_epochs: 8
+num_steps_per_epoch: 128
+num_envs: 128
+learning_rate: 0.001
+eval_episodes: 1
+output_dir: artifacts/acceptance_results/hover_state/shac
+thresholds:
+  min_reward_delta: 0.05
+  primary_metric_name: mean_reward
+  primary_metric_direction: max
+  primary_metric_threshold: -200.0
+  primary_metric_vs_random_delta: 0.0
+train_kwargs:
+  unroll_length: 16
+  critic_epochs: 8
+  critic_batch_size: 128
+  num_eval_envs: 32

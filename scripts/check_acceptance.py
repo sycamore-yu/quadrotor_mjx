@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 
 from dva_quadrotor_mjx.configs.acceptance import (
     AcceptanceConfig,
+    AcceptanceMetricGate,
     AcceptanceThresholds,
     _threshold_is_weaker,
     apply_threshold_overrides,
@@ -130,6 +131,10 @@ def run_acceptance(
     eval_fn = eval_fn or _evaluate_policy_on_seeds
 
     expected_backend = config.expected_backend or expected_backend_for_algo(config.algo)
+    metric_names = [
+        config.thresholds.primary_metric_name,
+        *[gate.name for gate in config.thresholds.additional_metrics],
+    ]
     runs: list[dict[str, Any]] = []
 
     for train_seed in config.train_seeds:
@@ -152,6 +157,7 @@ def run_acceptance(
             episodes=config.eval_episodes,
             steps=_resolve_eval_steps(config, env),
             primary_metric_name=thresholds.primary_metric_name,
+            metric_names=metric_names,
         )
         random_metrics = eval_fn(
             env,
@@ -160,11 +166,14 @@ def run_acceptance(
             episodes=config.eval_episodes,
             steps=_resolve_eval_steps(config, env),
             primary_metric_name=thresholds.primary_metric_name,
+            metric_names=metric_names,
         )
 
         train_kwargs = dict(config.train_kwargs or {})
         if config.algo == "ppo":
-            train_kwargs.setdefault("checkpoint_dir", str(run_dir / "checkpoints"))
+            train_kwargs.setdefault("checkpoint_dir", str((run_dir / "checkpoints").resolve()))
+        if config.algo == "shac":
+            train_kwargs.setdefault("checkpoint_dir", str((run_dir / "checkpoints").resolve()))
         result = train_fn(
             env,
             algo=config.algo,
@@ -191,6 +200,7 @@ def run_acceptance(
             config,
             checkpoint_path,
             template_state,
+            metric_names=metric_names,
             eval_fn=eval_fn,
             load_checkpoint_fn=load_checkpoint_fn,
             load_ppo_policy_fn=load_ppo_policy_fn,
@@ -386,6 +396,7 @@ def _validate_thresholds(
             "primary_metric_direction",
             "primary_metric_threshold",
             "primary_metric_vs_random_delta",
+            "additional_metrics",
         ],
     )
     if float(actual["min_reward_delta"]) < expected.min_reward_delta:
@@ -402,6 +413,31 @@ def _validate_thresholds(
         raise ValueError("Artifact primary_metric_threshold is weaker than config.")
     if float(actual["primary_metric_vs_random_delta"]) < expected.primary_metric_vs_random_delta:
         raise ValueError("Artifact primary_metric_vs_random_delta is weaker than config.")
+    actual_additional = actual.get("additional_metrics", [])
+    if len(actual_additional) != len(expected.additional_metrics):
+        raise ValueError("Artifact additional_metrics do not match config.")
+    for actual_gate, expected_gate in zip(actual_additional, expected.additional_metrics, strict=True):
+        _validate_additional_metric_gate(actual_gate, expected_gate)
+
+
+def _validate_additional_metric_gate(
+    actual: Mapping[str, Any],
+    expected: AcceptanceMetricGate,
+) -> None:
+    _require_mapping(actual, "additional_metrics[]")
+    _require_keys(actual, ["name", "direction", "threshold", "vs_random_delta"])
+    if actual["name"] != expected.name:
+        raise ValueError("Artifact additional metric name does not match config.")
+    if actual["direction"] != expected.direction:
+        raise ValueError("Artifact additional metric direction does not match config.")
+    if _threshold_is_weaker(
+        float(actual["threshold"]),
+        expected.threshold,
+        expected.direction,
+    ):
+        raise ValueError("Artifact additional metric threshold is weaker than config.")
+    if float(actual["vs_random_delta"]) < expected.vs_random_delta:
+        raise ValueError("Artifact additional metric vs_random_delta is weaker than config.")
 
 
 def _evaluate_run(
@@ -427,36 +463,63 @@ def _evaluate_run(
 
     final_primary = float(final_metrics["primary_metric_value"])
     random_primary = float(random_metrics["primary_metric_value"])
-    if thresholds.primary_metric_direction == "max":
-        if final_primary < thresholds.primary_metric_threshold:
-            failures.append(
-                "primary metric below threshold: "
-                f"{final_primary:.6f} < {thresholds.primary_metric_threshold:.6f}"
+    failures.extend(
+        _evaluate_metric_gate(
+            name=thresholds.primary_metric_name,
+            direction=thresholds.primary_metric_direction,
+            threshold=thresholds.primary_metric_threshold,
+            vs_random_delta=thresholds.primary_metric_vs_random_delta,
+            final_value=final_primary,
+            random_value=random_primary,
+        )
+    )
+
+    for gate in thresholds.additional_metrics:
+        final_value = _metric_summary_value(final_metrics, gate.name)
+        random_value = _metric_summary_value(random_metrics, gate.name)
+        failures.extend(
+            _evaluate_metric_gate(
+                name=gate.name,
+                direction=gate.direction,
+                threshold=gate.threshold,
+                vs_random_delta=gate.vs_random_delta,
+                final_value=final_value,
+                random_value=random_value,
             )
-        if final_primary < random_primary + thresholds.primary_metric_vs_random_delta:
-            failures.append(
-                "primary metric did not beat random baseline: "
-                f"{final_primary:.6f} < "
-                f"{random_primary + thresholds.primary_metric_vs_random_delta:.6f}"
-            )
-    elif thresholds.primary_metric_direction == "min":
-        if final_primary > thresholds.primary_metric_threshold:
-            failures.append(
-                "primary metric above threshold: "
-                f"{final_primary:.6f} > {thresholds.primary_metric_threshold:.6f}"
-            )
-        if final_primary > random_primary - thresholds.primary_metric_vs_random_delta:
-            failures.append(
-                "primary metric did not beat random baseline: "
-                f"{final_primary:.6f} > "
-                f"{random_primary - thresholds.primary_metric_vs_random_delta:.6f}"
-            )
-    else:
-        failures.append(
-            f"unknown primary_metric_direction {thresholds.primary_metric_direction!r}"
         )
 
     return (not failures), failures
+
+
+def _evaluate_metric_gate(
+    *,
+    name: str,
+    direction: str,
+    threshold: float,
+    vs_random_delta: float,
+    final_value: float,
+    random_value: float,
+) -> list[str]:
+    failures: list[str] = []
+    if direction == "max":
+        if final_value < threshold:
+            failures.append(f"{name} below threshold: {final_value:.6f} < {threshold:.6f}")
+        if final_value < random_value + vs_random_delta:
+            failures.append(
+                f"{name} did not beat random baseline: "
+                f"{final_value:.6f} < {random_value + vs_random_delta:.6f}"
+            )
+        return failures
+    if direction == "min":
+        if final_value > threshold:
+            failures.append(f"{name} above threshold: {final_value:.6f} > {threshold:.6f}")
+        if final_value > random_value - vs_random_delta:
+            failures.append(
+                f"{name} did not beat random baseline: "
+                f"{final_value:.6f} > {random_value - vs_random_delta:.6f}"
+            )
+        return failures
+    return [f"unknown metric direction {direction!r} for {name!r}"]
 
 
 def _resolve_checkpoint_path(
@@ -484,6 +547,7 @@ def _evaluate_final_checkpoint(
     checkpoint_path: Path,
     template_state: Any,
     *,
+    metric_names: list[str] | tuple[str, ...],
     eval_fn: Callable[..., dict[str, Any]],
     load_checkpoint_fn: Callable[..., Any],
     load_ppo_policy_fn: Callable[..., Any],
@@ -514,6 +578,7 @@ def _evaluate_final_checkpoint(
         episodes=config.eval_episodes,
         steps=_resolve_eval_steps(config, env),
         primary_metric_name=config.thresholds.primary_metric_name,
+        metric_names=metric_names,
     )
 
 
@@ -552,6 +617,7 @@ def _evaluate_policy_on_seeds(
     episodes: int,
     steps: int,
     primary_metric_name: str,
+    metric_names: list[str] | tuple[str, ...],
 ) -> dict[str, Any]:
     import jax
     import jax.numpy as jnp
@@ -579,11 +645,18 @@ def _evaluate_policy_on_seeds(
                 collision = collision or bool(jnp.asarray(state.info.get("collision", False)))
                 if bool(jnp.asarray(state.done)):
                     break
-            primary_metric_value = _extract_metric_value(
-                state,
-                primary_metric_name=primary_metric_name,
-                fallback_reward=total_reward,
-            )
+            metric_values = {
+                name: _extract_episode_metric_value(
+                    state,
+                    metric_name=name,
+                    fallback_reward=total_reward,
+                    success=success,
+                    collision=collision,
+                    episode_length=episode_length,
+                )
+                for name in dict.fromkeys(metric_names)
+            }
+            primary_metric_value = metric_values[primary_metric_name]
             record = {
                 "seed": episode_seed,
                 "reward": total_reward,
@@ -592,6 +665,7 @@ def _evaluate_policy_on_seeds(
                 "collision": collision,
                 "primary_metric_name": primary_metric_name,
                 "primary_metric_value": primary_metric_value,
+                "metric_values": metric_values,
                 "terminal_info": _jsonable(getattr(state, "info", {})),
                 "terminal_metrics": _jsonable(getattr(state, "metrics", {})),
             }
@@ -600,6 +674,10 @@ def _evaluate_policy_on_seeds(
             all_collisions.append(collision)
 
     primary_values = [record["primary_metric_value"] for record in episode_records]
+    metric_summaries = {
+        name: float(np.mean([record["metric_values"][name] for record in episode_records]))
+        for name in dict.fromkeys(metric_names)
+    }
     return {
         "mean_reward": float(np.mean([record["reward"] for record in episode_records])),
         "mean_episode_length": float(np.mean([record["length"] for record in episode_records])),
@@ -607,8 +685,54 @@ def _evaluate_policy_on_seeds(
         "collision_rate": float(np.mean(all_collisions)) if all_collisions else 0.0,
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": float(np.mean(primary_values)) if primary_values else float("nan"),
+        "metric_summaries": metric_summaries,
         "episodes": episode_records,
     }
+
+
+def _extract_episode_metric_value(
+    state: Any,
+    *,
+    metric_name: str,
+    fallback_reward: float,
+    success: bool,
+    collision: bool,
+    episode_length: int,
+) -> float:
+    if metric_name in {"mean_reward", "reward"}:
+        return float(fallback_reward)
+    if metric_name in {"mean_episode_length", "episode_length", "length"}:
+        return float(episode_length)
+    if metric_name in {"success", "success_rate"}:
+        return float(success)
+    if metric_name in {"collision", "collision_rate"}:
+        return float(collision)
+    return _extract_metric_value(
+        state,
+        primary_metric_name=metric_name,
+        fallback_reward=fallback_reward,
+    )
+
+
+def _metric_summary_value(metrics_block: Mapping[str, Any], metric_name: str) -> float:
+    if metric_name == metrics_block.get("primary_metric_name"):
+        return float(metrics_block["primary_metric_value"])
+    if metric_name in {"mean_reward", "reward"}:
+        return float(metrics_block["mean_reward"])
+    if metric_name in {"mean_episode_length", "episode_length", "length"}:
+        return float(metrics_block["mean_episode_length"])
+    if metric_name == "success_rate":
+        return float(metrics_block["success_rate"])
+    if metric_name == "collision_rate":
+        return float(metrics_block["collision_rate"])
+    if metric_name == "success":
+        return float(metrics_block.get("metric_summaries", {}).get("success", metrics_block["success_rate"]))
+    if metric_name == "collision":
+        return float(metrics_block.get("metric_summaries", {}).get("collision", metrics_block["collision_rate"]))
+    summaries = metrics_block.get("metric_summaries", {})
+    if metric_name not in summaries:
+        raise KeyError(f"Metric summary {metric_name!r} not found in acceptance metrics block.")
+    return float(summaries[metric_name])
 
 
 def _extract_metric_value(state: Any, *, primary_metric_name: str, fallback_reward: float) -> float:

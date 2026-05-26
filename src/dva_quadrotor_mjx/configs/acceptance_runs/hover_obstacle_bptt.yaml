@@ -1,0 +1,25 @@
+env: hover_obstacle
+algo: bptt
+train_seeds: [0, 1]
+eval_seeds: [100, 101]
+num_epochs: 4
+num_steps_per_epoch: 64
+num_envs: 16
+learning_rate: 0.001
+eval_episodes: 1
+output_dir: artifacts/acceptance_results/hover_obstacle/bptt
+thresholds:
+  min_reward_delta: 0.05
+  primary_metric_name: target_distance
+  primary_metric_direction: min
+  primary_metric_threshold: 3.0
+  primary_metric_vs_random_delta: 0.0
+  additional_metrics:
+    - name: obstacle_clearance
+      direction: max
+      threshold: 0.05
+      vs_random_delta: 0.0
+    - name: collision
+      direction: min
+      threshold: 0.5
+      vs_random_delta: 0.0

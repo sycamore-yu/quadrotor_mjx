@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -139,3 +140,46 @@ def test_acceptance_artifact_validation_rejects_weak_backend(tmp_path):
 
     with pytest.raises(ValueError, match="expected_backend"):
         validate_acceptance_artifact(json.loads(artifact_path.read_text()), config)
+
+
+def test_acceptance_config_loads_additional_metrics(tmp_path):
+    config_path = tmp_path / "gate.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "env: hover_obstacle",
+                "algo: bptt",
+                "thresholds:",
+                "  min_reward_delta: 0.0",
+                "  primary_metric_name: target_distance",
+                "  primary_metric_direction: min",
+                "  primary_metric_threshold: 1.0",
+                "  primary_metric_vs_random_delta: 0.0",
+                "  additional_metrics:",
+                "    - name: obstacle_clearance",
+                "      direction: max",
+                "      threshold: 0.1",
+                "      vs_random_delta: 0.0",
+            ]
+        )
+    )
+
+    config = load_acceptance_config(config_path)
+
+    assert len(config.thresholds.additional_metrics) == 1
+    assert config.thresholds.additional_metrics[0].name == "obstacle_clearance"
+
+
+def test_checked_in_acceptance_configs_support_dry_run():
+    config_paths = sorted(
+        Path("src/dva_quadrotor_mjx/configs/acceptance_runs").glob("*.yaml")
+    )
+
+    assert len(config_paths) == 13
+
+    for config_path in config_paths:
+        config = load_acceptance_config(config_path)
+        artifact = build_dry_run_artifact(config)
+        assert artifact["env"] == config.env
+        assert artifact["algo"] == config.algo
+        assert artifact["planned_runs"]
