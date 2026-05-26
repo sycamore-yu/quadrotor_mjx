@@ -12,12 +12,9 @@ from typing import Any
 import numpy as np
 import yaml
 
-_xla_flags = os.environ.get("XLA_FLAGS", "")
-if "--xla_gpu_triton_gemm_any=True" not in _xla_flags:
-    _xla_flags += " --xla_gpu_triton_gemm_any=True"
-os.environ["XLA_FLAGS"] = _xla_flags.strip()
-os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("MUJOCO_GL", "egl")
+from dva_quadrotor_mjx.utils.jax_runtime import configure_jax_runtime
+
+configure_jax_runtime()
 
 ALGORITHMS = ("bptt", "ppo", "shac")
 FULL_DEFAULT_EPOCHS = 100

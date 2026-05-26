@@ -72,7 +72,10 @@ def train(
     step_env = _checkpoint(env.step)
 
     def rollout(runner_state: RunnerState, params):
-        def step_fn(old_runner_state: RunnerState, _unused):
+        reward_dtype = runner_state.env_state.reward.dtype
+
+        def step_fn(carry, _unused):
+            old_runner_state, total_reward = carry
             train_state, env_state, last_obs, key, epoch_idx = old_runner_state
 
             action = train_state.apply_fn(params, last_obs)
@@ -81,16 +84,21 @@ def train(
             runner_state = RunnerState(
                 train_state, next_state, next_state.obs, key, epoch_idx
             )
-            return runner_state, TrajectoryState(reward=next_state.reward)
+            total_reward = total_reward + jnp.sum(next_state.reward)
+            return (runner_state, total_reward), None
 
-        return jax.lax.scan(step_fn, runner_state, None, num_steps_per_epoch)
+        init = (runner_state, jnp.zeros((), dtype=reward_dtype))
+        (runner_state, total_reward), _ = jax.lax.scan(
+            step_fn, init, None, num_steps_per_epoch
+        )
+        return runner_state, TrajectoryState(reward=total_reward)
 
     @jax.jit
     def train_epoch(epoch_state: RunnerState):
         @partial(jax.value_and_grad, has_aux=True)
         def loss_fn(params, runner_state: RunnerState):
             runner_state, trajectory = rollout(runner_state, params)
-            loss = -trajectory.reward.sum() / num_envs
+            loss = -trajectory.reward / num_envs
             return loss, runner_state
 
         train_state = epoch_state.train_state
