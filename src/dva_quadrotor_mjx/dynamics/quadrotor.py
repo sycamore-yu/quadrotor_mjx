@@ -24,8 +24,26 @@ class QuadrotorDynamics:
         self.motor_model = motor_model
         self.sim_dt = sim_dt
         self.physics_steps_per_control_step = physics_steps_per_control_step
+        policy = getattr(
+            jax.checkpoint_policies,
+            "dots_with_no_batch_dims_saveable",
+            None,
+        )
+        if policy is None:
+            self._step_core = jax.checkpoint(self._step_impl)
+        else:
+            self._step_core = jax.checkpoint(self._step_impl, policy=policy)
 
     def step(
+        self,
+        data: mjx.Data,
+        motor_force: jax.Array,
+        f_T: jax.Array,
+        omega_cmd: jax.Array,
+    ) -> tuple[mjx.Data, jax.Array, jax.Array]:
+        return self._step_core(data, motor_force, f_T, omega_cmd)
+
+    def _step_impl(
         self,
         data: mjx.Data,
         motor_force: jax.Array,

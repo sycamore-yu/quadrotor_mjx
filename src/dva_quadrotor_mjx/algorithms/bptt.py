@@ -1,6 +1,8 @@
 """BPTT (Backpropagation Through Time) algorithm for MJX environments.
 
-Reference: third_party/rpg_flightning/flightning/algos/bptt.py
+Reference:
+- third_party/rpg_flightning/flightning/algos/bptt.py
+- third_party/mujoco/mjx/training_apg.ipynb
 """
 
 from functools import partial
@@ -29,6 +31,19 @@ class RunnerState(NamedTuple):
     epoch_idx: int
 
 
+def _checkpoint(fn):
+    """Applies rematerialization using the best available JAX checkpoint policy."""
+
+    policy = getattr(
+        jax.checkpoint_policies,
+        "dots_with_no_batch_dims_saveable",
+        None,
+    )
+    if policy is None:
+        return jax.checkpoint(fn)
+    return jax.checkpoint(fn, policy=policy)
+
+
 def train(
     env,
     train_state: TrainState,
@@ -53,63 +68,37 @@ def train(
     env = LogWrapper(env)
     env = VecEnv(env)
 
-    def _train(runner_state: RunnerState):
-        def epoch_fn(epoch_state: RunnerState, _unused):
+    step_env = _checkpoint(env.step)
 
-            @partial(jax.value_and_grad, has_aux=True)
-            def loss_fn(params, runner_state: RunnerState):
+    def rollout(runner_state: RunnerState, params):
+        def step_fn(old_runner_state: RunnerState, _unused):
+            train_state, env_state, last_obs, key, epoch_idx = old_runner_state
 
-                def rollout(runner_state: RunnerState):
-                    def step_fn(old_runner_state: RunnerState, _unsused):
-                        train_state, env_state, last_obs, key, epoch_idx = (
-                            old_runner_state
-                        )
+            action = train_state.apply_fn(params, last_obs)
+            next_state = step_env(env_state, action)
 
-                        # Deterministic action
-                        action = train_state.apply_fn(params, last_obs)
-
-                        # Env step
-                        next_state = env.step(env_state, action)
-
-                        runner_state = RunnerState(
-                            train_state, next_state, next_state.obs, key, epoch_idx
-                        )
-
-                        return (
-                            runner_state,
-                            TrajectoryState(reward=next_state.reward),
-                        )
-
-                    runner_state, trajectory = jax.lax.scan(
-                        step_fn, runner_state, None, num_steps_per_epoch
-                    )
-                    return runner_state, trajectory
-
-                # Collect data
-                runner_state, trajectory = rollout(runner_state)
-                loss = -trajectory.reward.sum() / num_envs
-                return loss, runner_state
-
-            # Compute reward
-            train_state = epoch_state.train_state
-            (loss, epoch_state), grad = loss_fn(
-                train_state.params, epoch_state
+            runner_state = RunnerState(
+                train_state, next_state, next_state.obs, key, epoch_idx
             )
-            # Update params
-            train_state = train_state.apply_gradients(grads=grad)
+            return runner_state, TrajectoryState(reward=next_state.reward)
 
-            epoch_state = epoch_state._replace(
-                train_state=train_state, epoch_idx=epoch_state.epoch_idx + 1
-            )
+        return jax.lax.scan(step_fn, runner_state, None, num_steps_per_epoch)
 
-            return epoch_state, loss
+    @jax.jit
+    def train_epoch(epoch_state: RunnerState):
+        @partial(jax.value_and_grad, has_aux=True)
+        def loss_fn(params, runner_state: RunnerState):
+            runner_state, trajectory = rollout(runner_state, params)
+            loss = -trajectory.reward.sum() / num_envs
+            return loss, runner_state
 
-        # Run epochs
-        runner_state_final, losses = jax.lax.scan(
-            epoch_fn, runner_state, None, num_epochs
+        train_state = epoch_state.train_state
+        (loss, epoch_state), grad = loss_fn(train_state.params, epoch_state)
+        train_state = train_state.apply_gradients(grads=grad)
+        epoch_state = epoch_state._replace(
+            train_state=train_state, epoch_idx=epoch_state.epoch_idx + 1
         )
-
-        return {"runner_state": runner_state_final, "metrics": losses}
+        return epoch_state, loss
 
     # Initialize environments
     key, key_ = jax.random.split(key)
@@ -118,4 +107,12 @@ def train(
     obs = env_state.obs
     runner_state = RunnerState(train_state, env_state, obs, key, epoch_idx=0)
 
-    return jax.jit(_train)(runner_state)
+    losses = []
+    for _ in range(num_epochs):
+        runner_state, loss = train_epoch(runner_state)
+        losses.append(loss)
+
+    return {
+        "runner_state": runner_state,
+        "metrics": jnp.stack(losses) if losses else jnp.zeros((0,), dtype=jnp.float32),
+    }
