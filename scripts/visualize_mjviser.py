@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
-_xla_flags = os.environ.get("XLA_FLAGS", "")
-if "--xla_gpu_triton_gemm_any=True" not in _xla_flags:
-    _xla_flags += " --xla_gpu_triton_gemm_any=True"
-os.environ["XLA_FLAGS"] = _xla_flags.strip()
-os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("MUJOCO_GL", "egl")
+from dva_quadrotor_mjx.utils.jax_runtime import configure_jax_runtime
+
+configure_jax_runtime()
 
 import jax
 import mujoco
@@ -123,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         from mjviser import Viewer
 
     server = viser.ViserServer(port=args.port)
-    print(f"mjviser URL: http://localhost:{args.port}")
+    bound_port = server.get_port() if hasattr(server, "get_port") else args.port
+    print(f"mjviser URL: http://localhost:{bound_port}")
     print("Use SSH port forwarding from the headless server if needed.")
     Viewer(model, data, step_fn=step_fn, server=server).run()
     return 0

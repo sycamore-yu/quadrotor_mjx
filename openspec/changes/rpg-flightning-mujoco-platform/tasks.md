@@ -32,7 +32,7 @@
 - [x] 3.4 Register all three envs in `envs/registry.py`.
 - [x] 3.5 Add sensor configs for state-only, feature, rangefinder, RGB/depth modes.
 - [x] 3.6 Add deterministic reset tests for every env.
-- [ ] 3.7 Add success/failure tests for every env:
+- [x] 3.7 Add success/failure tests for every env:
   - hover obstacle: clearance, collision, target hold.
   - gate crossing: pass gate, miss gate, collide gate, timeout.
   - forest navigation: seed-stable trees, tree collision, goal reach, rangefinder hit.
@@ -43,7 +43,7 @@
   - `third_party/mujoco/mjx/training_apg.ipynb` for the `bptt` track
   - `third_party/jax_shac/shac/` for the `shac` track
   - require future backend work to document intentional semantic deviations
-- [ ] 4.1 Implement `algorithms/bptt.py` as a real `jax_bptt` backend:
+- [x] 4.1 Implement `algorithms/bptt.py` as a real `jax_bptt` backend:
   - vectorized reset/step over `num_envs`
   - differentiable `lax.scan` unroll through MJX dynamics
   - trajectory loss over reward/cost terms
@@ -51,7 +51,7 @@
   - metrics with backend=`jax_bptt`, loss, reward, SPS, compile/train time
   - checkpoint/eval/render compatibility
 - [x] 4.2 Implement `algorithms/ppo.py` or a clean Brax PPO adapter.
-- [ ] 4.3 Implement `src/dva_quadrotor_mjx/algorithms/shac.py` as a project-owned backend adapted from `third_party/jax_shac`:
+- [x] 4.3 Implement `src/dva_quadrotor_mjx/algorithms/shac.py` as a project-owned backend adapted from `third_party/jax_shac`:
   - reference `third_party/jax_shac/shac/train.py` for algorithm semantics
   - no runtime monkey patches
   - explicit actor/value config mapping from CLI/YAML
@@ -61,7 +61,7 @@
   - `train(config) -> TrainResult`
   - `eval(checkpoint, env, episodes) -> EvalResult`
   - `make_policy(checkpoint) -> callable`
-- [ ] 4.5 Add save/load parity test based on `rpg_flightning/examples/save_load_policy.ipynb`.
+- [x] 4.5 Add save/load parity test based on `rpg_flightning/examples/save_load_policy.ipynb`.
 - [x] 4.6 Fold APG into the BPTT public algorithm track while keeping APG placeholders reserved for `dva-quadrotor-mjx`.
 - [x] 4.7 Remove fallback smoke/baseline rollout as an accepted training backend for `bptt` and `shac`.
 - [x] 4.8 Add backend assertion tests: metrics for `bptt`, `ppo`, and `shac` SHALL report `jax_bptt`, `brax_ppo`, and `jax_shac` respectively.
@@ -124,18 +124,18 @@ Full training gates:
 
 ## 7. Visualization And Replay
 
-- [ ] 7.1 `python scripts/visualize_mjviser.py --env hover_obstacle --mode scene --port 8080`
-- [ ] 7.2 `python scripts/visualize_mjviser.py --env gate_crossing --mode random --steps 500 --port 8081`
-- [ ] 7.3 `python scripts/visualize_mjviser.py --env forest_navigation --mode random --steps 500 --port 8082`
-- [ ] 7.4 `python scripts/render.py --env hover_obstacle --checkpoint <ckpt> --output artifacts/hover_obstacle.mp4`
-- [ ] 7.5 `python scripts/eval.py --env gate_crossing --algo shac --checkpoint <ckpt> --episodes 8`
+- [x] 7.1 `python scripts/visualize_mjviser.py --env hover_obstacle --mode scene --port 8080`
+- [x] 7.2 `python scripts/visualize_mjviser.py --env gate_crossing --mode random --steps 500 --port 8081`
+- [x] 7.3 `python scripts/visualize_mjviser.py --env forest_navigation --mode random --steps 500 --port 8082`
+- [x] 7.4 `python scripts/render.py --env hover_obstacle --checkpoint <ckpt> --output artifacts/hover_obstacle.mp4`
+- [x] 7.5 `python scripts/eval.py --env gate_crossing --algo shac --checkpoint <ckpt> --episodes 8`
 
 ## 8. Final Acceptance
 
 - [x] 8.1 `openspec validate rpg-flightning-mujoco-platform --strict` passes.
 - [x] 8.2 `python -m pytest tests -q` passes without manual environment variables.
 - [x] 8.3 All smoke train commands in section 6 pass.
-- [ ] 8.4 Three scene visualization commands in section 7 pass.
+- [x] 8.4 Three scene visualization commands in section 7 pass.
 - [x] 8.5 Final README section documents exact train/eval/render commands.
-- [ ] 8.6 `delivery-status-and-grill.md` has no open blocking grill decision for
+- [x] 8.6 `delivery-status-and-grill.md` has no open blocking grill decision for
   any acceptance item being claimed complete.

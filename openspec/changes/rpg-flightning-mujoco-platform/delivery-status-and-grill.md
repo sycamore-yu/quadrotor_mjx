@@ -1,6 +1,6 @@
 # Delivery Status And Grill Log
 
-Date: 2026-05-25
+Date: 2026-05-26
 
 This file is the handoff point for `rpg-flightning-mujoco-platform`. It records
 what is actually delivered, what remains before the change is shippable, and the
@@ -53,25 +53,45 @@ mistaken for completed work.
 - Scene task configs now include `state`, `feature`, `rangefinder`, and
   `rgb_depth` sensor mode metadata.
 - Scene deterministic reset tests now cover all three scene envs.
+- Scene success/failure tests now cover:
+  - hover obstacle clearance, collision, and target hold
+  - gate crossing pass, miss, collide, and timeout
+  - forest navigation seed-stable trees, collision, goal reach, and rangefinder hit
+- BPTT metrics now include both `compile_time_seconds` and
+  `train_time_seconds`, and the smoke CLI writes them into the metrics artifact.
+- BPTT save/load parity is now covered by a real `trainer.train(..., algo="bptt")`
+  path rather than a hand-built checkpoint-only fixture.
+- SHAC runtime now includes a project-owned `src/dva_quadrotor_mjx/algorithms/shac/`
+  source package committed into the repo, instead of depending on untracked
+  local files.
+- `scripts/visualize_mjviser.py` now reports the bound viewer port correctly and
+  the three scene viewer commands from `tasks.md` section 7.1-7.3 have been
+  verified on the headless server by observing active listeners on ports
+  `8080`, `8081`, and `8082`, with `viser` startup banner capture for the
+  random-play scene commands.
+- `scripts/render.py` now forces `MUJOCO_GL=egl` before any third-party imports,
+  and the final render acceptance command from `tasks.md` section 7.4 now
+  writes a non-empty MP4 on the headless server.
+- `scripts/eval.py` works with the current SHAC pickle checkpoint path, and the
+  final evaluation command from `tasks.md` section 7.5 has been verified with
+  `artifacts/verify_shac_gate/gate_crossing_shac_seed0_checkpoints/checkpoint.pkl`.
 
 ### Not Yet Delivered
 
-- `jax_bptt` full completion remains pending: reward-improvement gates and
-  eval/render/play checkpoint compatibility are not verified for every
+- `jax_bptt` backend implementation is present, but full completion remains
+  pending because reward-improvement gates are not yet verified for every
   acceptance env.
-- `jax_shac` full completion remains pending: it still needs the project-owned
-  adapted backend contract from Decision 5, plus reward-improvement gates and
-  eval/render/play checkpoint compatibility for every acceptance env.
+- `jax_shac` project-owned adapted backend is now committed, but full
+  completion remains pending because reward-improvement gates and full
+  eval/render/play acceptance across every acceptance env are not yet verified.
 - Full `python -m pytest tests -q` passes in the current state
   (`51 passed, 1 warning`, 2026-05-25).
-- Full success/failure tests for all three scene envs remain incomplete:
-  target hold, gate pass/collide/timeout, and forest rangefinder-hit cases are
-  still open.
 - Full learning gates are not complete:
   all `bptt`, `ppo`, and `shac` combinations across `hover_state`,
   `hover_obstacle`, `gate_crossing`, and `forest_navigation`, plus
   `hover_features + bptt`.
-- Three mjviser scene commands are not yet verified as final acceptance.
+- Full reward-improvement acceptance matrix remains unverified even though the
+  viewer/render/eval command set from section 7 is now exercised successfully.
 
 ## Delivery Gates
 
@@ -89,6 +109,14 @@ The change is not ready to archive until all gates below pass:
 - mjviser visualization gates from `tasks.md` section 7.1 to 7.5
 - No metric artifact with `backend="smoke_rollout"` may be used as evidence of
   training parity.
+
+## Verified Commands
+
+- `python scripts/visualize_mjviser.py --env hover_obstacle --mode scene --port 8080`
+- `python scripts/visualize_mjviser.py --env gate_crossing --mode random --steps 500 --port 8081`
+- `python scripts/visualize_mjviser.py --env forest_navigation --mode random --steps 500 --port 8082`
+- `python scripts/render.py --env hover_obstacle --checkpoint artifacts/hover_obstacle_bptt_seed0.ckpt --output artifacts/hover_obstacle.mp4`
+- `python scripts/eval.py --env gate_crossing --algo shac --checkpoint artifacts/verify_shac_gate/gate_crossing_shac_seed0_checkpoints/checkpoint.pkl --episodes 8`
 
 ## Compromise Risk Scan
 
