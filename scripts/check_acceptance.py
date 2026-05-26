@@ -111,6 +111,7 @@ def run_acceptance(
     from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint, save_checkpoint, train
     from dva_quadrotor_mjx.envs.registry import load
     from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+    from dva_quadrotor_mjx.learning.shac_checkpoint import load_policy as load_shac_policy
     from dva_quadrotor_mjx.policies import create_train_state, make_network, select_action
     from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
@@ -193,6 +194,7 @@ def run_acceptance(
             eval_fn=eval_fn,
             load_checkpoint_fn=load_checkpoint_fn,
             load_ppo_policy_fn=load_ppo_policy_fn,
+            load_shac_policy_fn=load_shac_policy,
         )
 
         run_pass, failures = _evaluate_run(
@@ -485,9 +487,16 @@ def _evaluate_final_checkpoint(
     eval_fn: Callable[..., dict[str, Any]],
     load_checkpoint_fn: Callable[..., Any],
     load_ppo_policy_fn: Callable[..., Any],
+    load_shac_policy_fn: Callable[..., Any],
 ) -> dict[str, Any]:
     if config.algo == "ppo":
         policy = load_ppo_policy_fn(checkpoint_path)
+
+        def policy_fn(obs, key):
+            return policy(obs, key)[0]
+
+    elif config.algo == "shac":
+        policy = load_shac_policy_fn(checkpoint_path, env)
 
         def policy_fn(obs, key):
             return policy(obs, key)[0]

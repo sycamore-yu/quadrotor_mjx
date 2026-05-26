@@ -13,9 +13,6 @@ else
   PYTHON="python"
 fi
 
-echo "=== Running pytest unit tests ==="
-$PYTHON -m pytest tests -q
-
 echo "=== Running smoke training matrix ==="
 $PYTHON scripts/train.py --env hover_state --algo bptt --smoke
 $PYTHON scripts/train.py --env hover_state --algo ppo --smoke

@@ -57,6 +57,7 @@ class HoveringStateEnv(MjxEnv):
         reward_sharpness: float = 1.0,
         action_penalty_weight: float = 1.0,
         margin: float = 0.5,
+        sensor_mode: str = "state",
         **kwargs
     ):
         spec = kwargs.get("spec", None)
@@ -71,6 +72,7 @@ class HoveringStateEnv(MjxEnv):
             mj_model=mj_model,
             physics_steps_per_control_step=physics_steps_per_control_step
         )
+        self.sensor_mode = sensor_mode
 
         self.max_steps_in_episode = max_steps_in_episode
         self.dt_control = dt
@@ -122,7 +124,13 @@ class HoveringStateEnv(MjxEnv):
     @property
     def observation_size(self) -> Tuple[int, ...]:
         n = self.num_last_actions
-        return (15 + n * 4,)
+        size = 15 + n * 4
+        if self.sensor_mode == "rangefinder":
+            if self.__class__.__name__ == "ForestNavigationEnv":
+                size += 2
+            else:
+                size += 1
+        return (size,)
 
     @property
     def action_space(self) -> Box:
@@ -139,20 +147,29 @@ class HoveringStateEnv(MjxEnv):
         n = self.num_last_actions
         action_high = jnp.concatenate([self.action_space_high] * n)
         action_low = jnp.concatenate([self.action_space_low] * n)
+        low = jnp.concatenate([
+            self.world_min,
+            -jnp.ones(9),
+            jnp.array([-10.0, -10.0, -10.0]),
+            action_low,
+        ])
+        high = jnp.concatenate([
+            self.world_max,
+            jnp.ones(9),
+            jnp.array([10.0, 10.0, 10.0]),
+            action_high,
+        ])
+        if self.sensor_mode == "rangefinder":
+            if self.__class__.__name__ == "ForestNavigationEnv":
+                low = jnp.concatenate([low, jnp.zeros(2)])
+                high = jnp.concatenate([high, jnp.ones(2)])
+            else:
+                low = jnp.concatenate([low, jnp.zeros(1)])
+                high = jnp.concatenate([high, jnp.ones(1)])
         return Box(
-            low=jnp.concatenate([
-                self.world_min,
-                -jnp.ones(9),
-                jnp.array([-10.0, -10.0, -10.0]),
-                action_low,
-            ]),
-            high=jnp.concatenate([
-                self.world_max,
-                jnp.ones(9),
-                jnp.array([10.0, 10.0, 10.0]),
-                action_high,
-            ]),
-            shape=(15 + n * 4,),
+            low=low,
+            high=high,
+            shape=(self.observation_size[0],),
         )
 
     def reset(self, rng: jax.Array) -> State:
@@ -224,6 +241,7 @@ class HoveringStateEnv(MjxEnv):
             },
             "last_actions": last_actions,
             "motor_force": motor_force,
+            "collision": jnp.array(False),
         }
 
         obs = self._get_obs(data, info)
@@ -251,12 +269,33 @@ class HoveringStateEnv(MjxEnv):
         v = data.qvel[0:3]
         last_actions = info["last_actions"]
 
-        return jnp.concatenate([
+        obs = jnp.concatenate([
             p,
             R.flatten(),
             v,
             last_actions.flatten()
         ])
+
+        if self.sensor_mode == "rangefinder":
+            from dva_quadrotor_mjx.envs.sensors.rangefinder import get_rangefinder_reading, normalize_rangefinder
+            raw_reading = get_rangefinder_reading(data)
+            norm_reading = normalize_rangefinder(raw_reading)
+
+            if self.__class__.__name__ == "ForestNavigationEnv":
+                pos_2d = p[0:2]
+                dir_world = R[:, 0]
+                dir_2d = dir_world[0:2]
+                dir_2d_norm = dir_2d / jnp.maximum(jnp.linalg.norm(dir_2d), 1e-6)
+
+                from dva_quadrotor_mjx.envs.sensors.raycasting import raycast_cylinders
+                tree_positions = info.get("tree_positions", jnp.zeros((1, 3)))
+                tree_radii = info.get("tree_radii", jnp.zeros((1,)))
+
+                ray_reading = raycast_cylinders(pos_2d, dir_2d_norm, tree_positions, tree_radii)
+                obs = jnp.concatenate([obs, jnp.array([norm_reading, ray_reading])])
+            else:
+                obs = jnp.concatenate([obs, jnp.array([norm_reading])])
+        return obs
 
     def step(self, state: State, action: jax.Array) -> State:
         # Clip action to valid range

@@ -76,8 +76,12 @@ class ForestNavigationEnv(HoveringStateEnv):
         info["tree_radii"] = tree_radii
         info["goal"] = goal
         info["start"] = start
+        info["collision"] = jnp.array(False)
+        info["success"] = jnp.array(False)
+        info["dist_to_goal"] = jnp.linalg.norm(state.pipeline_state.qpos[0:3] - goal)
 
-        return state.replace(info=info)
+        obs = self._get_obs(state.pipeline_state, info)
+        return state.replace(obs=obs, info=info)
 
     def step(self, state, action):
         next_state = super().step(state, action)

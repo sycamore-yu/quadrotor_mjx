@@ -60,6 +60,8 @@ class GateCrossingEnv(HoveringStateEnv):
         info = dict(state.info)
         info["current_gate"] = jnp.array(0, dtype=jnp.int32)
         info["gates_crossed"] = jnp.array(0, dtype=jnp.int32)
+        info["gate_success"] = jnp.array(False)
+        info["collision"] = jnp.array(False)
         return state.replace(info=info)
 
     def step(self, state, action):
@@ -67,9 +69,10 @@ class GateCrossingEnv(HoveringStateEnv):
 
         p = next_state.pipeline_state.qpos[0:3]
         current_gate = state.info["current_gate"]
+        gate_index = jnp.minimum(current_gate, self.num_gates - 1)
 
-        # Check if crossed current gate
-        gate_pos = self.gate_positions[current_gate]
+        # Check if crossed current gate.
+        gate_pos = self.gate_positions[gate_index]
         # Gate plane is at x = gate_pos[0]
         prev_p = state.pipeline_state.qpos[0:3]
         crossed = jnp.logical_and(
@@ -81,12 +84,14 @@ class GateCrossingEnv(HoveringStateEnv):
             jnp.abs(p[1] - gate_pos[1]) < self.gate_width / 2,
             jnp.abs(p[2] - gate_pos[2]) < self.gate_height / 2
         )
-        gate_success = jnp.logical_and(crossed, in_bounds)
+        active_gate = current_gate < self.num_gates
+        gate_success = jnp.logical_and(active_gate, jnp.logical_and(crossed, in_bounds))
+        gate_collision = jnp.logical_and(active_gate, jnp.logical_and(crossed, jnp.logical_not(in_bounds)))
 
         # Reward for approaching next gate
         target = jax.lax.select(
-            current_gate < self.num_gates,
-            self.gate_positions[jnp.minimum(current_gate, self.num_gates - 1)],
+            active_gate,
+            self.gate_positions[gate_index],
             self.gate_positions[-1]
         )
         dist_to_target = jnp.linalg.norm(p - target)
@@ -94,22 +99,24 @@ class GateCrossingEnv(HoveringStateEnv):
 
         # Gate crossing bonus
         gate_bonus = jax.lax.select(gate_success, 10.0, 0.0)
+        collision_penalty = jax.lax.select(gate_collision, -10.0, 0.0)
 
         new_gate = jnp.minimum(
             current_gate + jnp.where(gate_success, 1, 0),
             self.num_gates
         )
 
-        reward = next_state.reward + approach_reward + gate_bonus
+        reward = next_state.reward + approach_reward + gate_bonus + collision_penalty
 
         info = dict(next_state.info)
         info["current_gate"] = new_gate
         info["gates_crossed"] = state.info["gates_crossed"] + jnp.where(gate_success, 1, 0)
         info["gate_success"] = gate_success
+        info["collision"] = gate_collision
 
         # Done if all gates crossed
         all_crossed = new_gate >= self.num_gates
-        done = jnp.where(all_crossed, 1.0, next_state.done)
+        done = jnp.where(jnp.logical_or(all_crossed, gate_collision), 1.0, next_state.done)
 
         return next_state.replace(
             reward=reward,

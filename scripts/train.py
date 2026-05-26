@@ -96,6 +96,17 @@ def main(argv: list[str] | None = None) -> int:
             config.setdefault("run_evals", False)
         if args.num_timesteps is not None:
             config.setdefault("num_timesteps", args.num_timesteps)
+    if args.algo == "shac":
+        config.setdefault("checkpoint_dir", str((output_dir / f"{stem}_checkpoints").resolve()))
+        if args.smoke:
+            config.setdefault("num_timesteps", 0)
+            config.setdefault("unroll_length", 1)
+            config.setdefault("critic_epochs", 1)
+            config.setdefault("critic_batch_size", max(args.num_envs, 1))
+            config.setdefault("num_evals", 1)
+            config.setdefault("num_eval_envs", min(args.num_envs, 4))
+        if args.num_timesteps is not None:
+            config.setdefault("num_timesteps", args.num_timesteps)
 
     env = NormalizeActionWrapper(load(args.env))
     network = make_network(args.algo, env.action_space.shape[0])
