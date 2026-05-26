@@ -6,6 +6,7 @@ Reference:
 """
 
 from functools import partial
+import time
 from typing import NamedTuple
 
 import chex
@@ -108,11 +109,20 @@ def train(
     runner_state = RunnerState(train_state, env_state, obs, key, epoch_idx=0)
 
     losses = []
-    for _ in range(num_epochs):
-        runner_state, loss = train_epoch(runner_state)
-        losses.append(loss)
+    compile_time_seconds = 0.0
+    if num_epochs > 0:
+        compile_start = time.time()
+        runner_state, first_loss = train_epoch(runner_state)
+        first_loss = jax.block_until_ready(first_loss)
+        compile_time_seconds = time.time() - compile_start
+        losses.append(first_loss)
+
+        for _ in range(1, num_epochs):
+            runner_state, loss = train_epoch(runner_state)
+            losses.append(loss)
 
     return {
         "runner_state": runner_state,
         "metrics": jnp.stack(losses) if losses else jnp.zeros((0,), dtype=jnp.float32),
+        "compile_time_seconds": jnp.asarray(compile_time_seconds, dtype=jnp.float32),
     }

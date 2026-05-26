@@ -81,6 +81,7 @@ def test_bptt_save_load_parity(tmp_path):
     assert result.metrics["num_envs"] == 2
     assert isinstance(result.metrics["loss"], list)
     assert len(result.metrics["loss"]) == 1
+    assert result.metrics["compile_time_seconds"] >= 0.0
     assert result.metrics["train_time_seconds"] >= 0.0
     assert result.metrics["sps"] > 0.0
     assert result.train_state is not None

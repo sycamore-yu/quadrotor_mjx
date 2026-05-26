@@ -156,6 +156,7 @@ def _train_jax_bptt(
     runner_state = result["runner_state"]
     final_train_state = runner_state.train_state
     train_time = time.time() - start
+    compile_time = float(np.asarray(result.get("compile_time_seconds", 0.0)))
     loss_values = np.asarray(losses)
     mean_reward = float(-loss_values[-1]) if loss_values.size else float("nan")
     metrics = {
@@ -166,6 +167,7 @@ def _train_jax_bptt(
         "num_envs": num_envs,
         "loss": loss_values.tolist(),
         "mean_reward": mean_reward,
+        "compile_time_seconds": compile_time,
         "train_time_seconds": train_time,
         "sps": float(num_epochs * num_steps_per_epoch * num_envs / max(train_time, 1e-9)),
     }

@@ -29,6 +29,7 @@ class LogWrapper(Wrapper):
         next_state = self.env.step(state, action)
         
         done = next_state.done
+        done_bool = done > 0.5
         
         episode_returns = state.info["episode_returns"] + next_state.reward
         episode_lengths = state.info["episode_lengths"] + 1
@@ -46,7 +47,7 @@ class LogWrapper(Wrapper):
             "episode_lengths": jnp.where(done > 0.5, 0, episode_lengths),
             "returned_episode_returns": returned_episode_returns,
             "returned_episode_lengths": returned_episode_lengths,
-            "returned_episode": done,
+            "returned_episode": done_bool,
         })
         
         metrics = dict(next_state.metrics)
