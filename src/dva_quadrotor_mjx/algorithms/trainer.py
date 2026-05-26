@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import pickle
 import time
 from typing import Any, Callable, Dict, Optional
 
@@ -187,15 +188,25 @@ def _train_jax_shac(
 ) -> TrainResult:
     """Trains SHAC through the vendored ``jax_shac`` backend."""
 
-    from dva_quadrotor_mjx.algorithms import shac
+    from dva_quadrotor_mjx.algorithms import shac as shac_backend
 
     num_timesteps = int(
         kwargs.pop("num_timesteps", num_epochs * num_steps_per_epoch * num_envs)
     )
     checkpoint_dir = Path(kwargs.pop("checkpoint_dir", "artifacts/shac_checkpoints"))
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    if num_timesteps == 0:
+        return _init_jax_shac_checkpoint(
+            env,
+            checkpoint_dir=checkpoint_dir,
+            num_steps_per_epoch=num_steps_per_epoch,
+            num_envs=num_envs,
+            learning_rate=learning_rate,
+            seed=seed,
+            **kwargs,
+        )
     start = time.time()
-    result = shac.train(
+    result = shac_backend.train(
         env,
         policy_network=None,
         value_network=None,
@@ -210,32 +221,84 @@ def _train_jax_shac(
         eval_env=kwargs.pop("eval_env", env),
         **kwargs,
     )
-    raw_metrics = dict(result["metrics"])
     train_time = time.time() - start
-    metrics = _compact_training_metrics(raw_metrics)
-    if "training/policy_loss" in raw_metrics:
-        metrics["actor_loss"] = float(np.mean(np.asarray(raw_metrics["training/policy_loss"])))
-    if "training/v_loss" in raw_metrics:
-        metrics["value_loss"] = float(np.mean(np.asarray(raw_metrics["training/v_loss"])))
-    metrics.update(
-        {
-            "algo": "shac",
-            "backend": "jax_shac",
-            "num_timesteps": num_timesteps,
-            "num_envs": num_envs,
-            "episode_length": num_steps_per_epoch,
-            "checkpoint_dir": str(checkpoint_dir),
-            "train_time_seconds": train_time,
-        }
-    )
-    if "eval/episode_reward" in metrics:
-        metrics["mean_reward"] = float(np.asarray(metrics["eval/episode_reward"]))
-    checkpoint_path = checkpoint_dir / "checkpoint.pkl"
+    metrics = dict(result["metrics"])
+    metrics["train_time_seconds"] = train_time
+    resolved_checkpoint = result.get("checkpoint_path")
+    if resolved_checkpoint is None:
+        resolved_checkpoint = shac_backend.resolve_checkpoint_path(checkpoint_dir)
     return TrainResult(
         params=result["params"],
         metrics=metrics,
         train_state=None,
-        checkpoint_path=checkpoint_path if checkpoint_path.exists() else None,
+        checkpoint_path=resolved_checkpoint,
+    )
+
+
+def _init_jax_shac_checkpoint(
+    env,
+    *,
+    checkpoint_dir: Path,
+    num_steps_per_epoch: int,
+    num_envs: int,
+    learning_rate: float,
+    seed: int,
+    **kwargs,
+) -> TrainResult:
+    """Initializes SHAC state and writes a checkpoint without optimization.
+
+    This is the SHAC smoke path: it exercises the real vendored SHAC network
+    and state initialization while avoiding the full short-horizon gradient
+    compile.  Full acceptance gates must use ``num_timesteps > 0``.
+    """
+
+    from dva_quadrotor_mjx.algorithms.shac.train import SHAC
+
+    trainer = SHAC(
+        environment=env,
+        num_timesteps=0,
+        episode_length=num_steps_per_epoch,
+        num_envs=num_envs,
+        num_eval_envs=int(kwargs.pop("num_eval_envs", min(num_envs, 128))),
+        actor_learning_rate=learning_rate,
+        critic_learning_rate=float(kwargs.pop("critic_learning_rate", learning_rate)),
+        seed=seed,
+        checkpoint_dir=str(checkpoint_dir),
+        eval_env=kwargs.pop("eval_env", env),
+        **kwargs,
+    )
+    key = jax.random.PRNGKey(seed)
+    key_env, key_state = jax.random.split(key)
+    env_state = trainer.reset_fn(jax.random.split(key_env, num_envs))
+    training_state, key_state = trainer.init_training_state(key_state)
+    checkpoint_path = checkpoint_dir / "checkpoint.pkl"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    with checkpoint_path.open("wb") as handle:
+        pickle.dump(
+            {
+                "epoch_key": key_state,
+                "local_key": key_state,
+                "training_state": training_state,
+                "env_state": env_state,
+            },
+            handle,
+        )
+    metrics = {
+        "algo": "shac",
+        "backend": "jax_shac",
+        "num_timesteps": 0,
+        "num_envs": num_envs,
+        "episode_length": num_steps_per_epoch,
+        "checkpoint_dir": str(checkpoint_dir),
+        "checkpoint_path": str(checkpoint_path),
+        "mean_reward": float("nan"),
+        "note": "SHAC smoke initialization only; reward gates require num_timesteps > 0.",
+    }
+    return TrainResult(
+        params=training_state.policy_params,
+        metrics=metrics,
+        train_state=None,
+        checkpoint_path=checkpoint_path,
     )
 
 
@@ -331,15 +394,42 @@ def _train_brax_ppo(
     )
 
 
+def _run_episode(env, policy_fn: Callable, key: jax.Array, steps: int):
+    state = env.reset(key)
+    total_reward = 0.0
+    episode_length = 0
+    success = False
+    collision = False
+
+    for _ in range(steps):
+        key, action_key = jax.random.split(key)
+        action, _ = policy_fn(state.obs, action_key)
+        state = env.step(state, action)
+        total_reward += float(jnp.asarray(state.reward))
+        episode_length += 1
+        success = success or bool(jnp.asarray(state.info.get("success", False)))
+        collision = collision or bool(jnp.asarray(state.info.get("collision", False)))
+        if bool(jnp.asarray(state.done)):
+            break
+
+    return {
+        "reward": total_reward,
+        "length": episode_length,
+        "success": success,
+        "collision": collision,
+    }
+
+
 def eval(
-    checkpoint: TrainState,
+    checkpoint: Any,
     env,
     episodes: int = 10,
     seed: int = 0,
     max_steps: int | None = None,
 ) -> EvalResult:
-    """Evaluates a TrainState checkpoint with the shared policy interface."""
+    """Evaluates a checkpoint with the shared policy interface."""
 
+    policy_fn = make_policy(checkpoint, env)
     steps = env.max_steps_in_episode if max_steps is None else max_steps
     rewards = []
     lengths = []
@@ -348,7 +438,7 @@ def eval(
     key = jax.random.PRNGKey(seed)
     for _ in range(episodes):
         key, episode_key = jax.random.split(key)
-        episode = _run_episode(env, checkpoint, episode_key, steps)
+        episode = _run_episode(env, policy_fn, episode_key, steps)
         rewards.append(episode["reward"])
         lengths.append(episode["length"])
         successes.append(episode["success"])
@@ -390,24 +480,70 @@ def _compact_training_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     return compact
 
 
-def make_policy(checkpoint: TrainState) -> Callable:
-    """Creates a normalized-action policy from a TrainState checkpoint."""
+def make_policy(checkpoint: Any, env: Any = None) -> Callable:
+    """Creates a unified policy function: policy(obs, key) -> (action, extras)."""
 
-    def policy(obs):
-        return select_action(checkpoint, obs)
+    if isinstance(checkpoint, TrainState):
+        def policy_fn(obs, key=None):
+            return select_action(checkpoint, obs), {}
+        return policy_fn
 
-    return policy
+    path = Path(checkpoint)
+
+    # 1. PPO Checkpoint
+    is_ppo = False
+    p_path = path if path.is_dir() else path.parent
+    if (p_path / "ppo_network_config.json").exists():
+        is_ppo = True
+    elif "ppo" in str(path).lower():
+        is_ppo = True
+
+    if is_ppo:
+        from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+        ppo_p = path if path.is_dir() else path.parent
+        return load_ppo_policy(ppo_p)
+
+    # 2. SHAC Checkpoint
+    is_shac = False
+    if "shac" in str(path).lower() or path.suffix == ".pkl" or (path.is_dir() and (path / "checkpoint.pkl").exists()):
+        is_shac = True
+
+    if is_shac:
+        from dva_quadrotor_mjx.learning.shac_checkpoint import load_policy as load_shac_policy
+        return load_shac_policy(path, env)
+
+    # 3. BPTT Checkpoint (Flax TrainState)
+    from dva_quadrotor_mjx.policies import create_train_state, make_network
+    network = make_network("bptt", env.action_space.shape[0])
+    template = create_train_state(
+        network,
+        env.observation_size,
+        seed=0,
+        learning_rate=3e-4,
+    )
+    loaded_state = load_checkpoint(path, template)
+    def bptt_policy_fn(obs, key=None):
+        return select_action(loaded_state, obs), {}
+    return bptt_policy_fn
 
 
-def save_checkpoint(path: str | Path, train_state: TrainState) -> None:
-    """Saves a Flax TrainState checkpoint."""
+def save_checkpoint(path: str | Path, checkpoint: Any) -> None:
+    """Saves a checkpoint (Flax TrainState or SHAC params)."""
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(flax.serialization.to_bytes(train_state))
+    if isinstance(checkpoint, TrainState):
+        path.write_bytes(flax.serialization.to_bytes(checkpoint))
+    else:
+        with path.open("wb") as handle:
+            pickle.dump(checkpoint, handle)
 
 
-def load_checkpoint(path: str | Path, train_state: TrainState) -> TrainState:
-    """Loads a Flax TrainState checkpoint using ``train_state`` as template."""
+def load_checkpoint(path: str | Path, train_state: Optional[TrainState] = None) -> Any:
+    """Loads a checkpoint (Flax TrainState or SHAC params)."""
 
-    return flax.serialization.from_bytes(train_state, Path(path).read_bytes())
+    path = Path(path)
+    if train_state is not None:
+        return flax.serialization.from_bytes(train_state, path.read_bytes())
+    with path.open("rb") as handle:
+        return pickle.load(handle)
