@@ -14,7 +14,7 @@ class LogWrapper(Wrapper):
             "episode_lengths": jnp.zeros((), dtype=jnp.int32),
             "returned_episode_returns": jnp.zeros(()),
             "returned_episode_lengths": jnp.zeros((), dtype=jnp.int32),
-            "returned_episode": jnp.zeros(()),
+            "returned_episode": jnp.zeros((), dtype=jnp.bool_),
         })
         
         metrics = dict(state.metrics)
