@@ -190,7 +190,10 @@ def _train_jax_shac(
 ) -> TrainResult:
     """Trains SHAC through the vendored ``jax_shac`` backend."""
 
-    from dva_quadrotor_mjx.algorithms import shac as shac_backend
+    from dva_quadrotor_mjx.algorithms.shac._impl import (
+        train as _shac_train,
+        resolve_checkpoint_path as _shac_resolve_checkpoint_path,
+    )
 
     num_timesteps = int(
         kwargs.pop("num_timesteps", num_epochs * num_steps_per_epoch * num_envs)
@@ -208,7 +211,7 @@ def _train_jax_shac(
             **kwargs,
         )
     start = time.time()
-    result = shac_backend.train(
+    result = _shac_train(
         env,
         policy_network=None,
         value_network=None,
@@ -228,7 +231,7 @@ def _train_jax_shac(
     metrics["train_time_seconds"] = train_time
     resolved_checkpoint = result.get("checkpoint_path")
     if resolved_checkpoint is None:
-        resolved_checkpoint = shac_backend.resolve_checkpoint_path(checkpoint_dir)
+        resolved_checkpoint = _shac_resolve_checkpoint_path(checkpoint_dir)
     return TrainResult(
         params=result["params"],
         metrics=metrics,
