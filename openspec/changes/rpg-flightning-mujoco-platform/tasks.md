@@ -39,6 +39,10 @@
 
 ## 4. Algorithms
 
+- [x] 4.0 Record backend reference semantics in OpenSpec:
+  - `third_party/mujoco/mjx/training_apg.ipynb` for the `bptt` track
+  - `third_party/jax_shac/shac/` for the `shac` track
+  - require future backend work to document intentional semantic deviations
 - [ ] 4.1 Implement `algorithms/bptt.py` as a real `jax_bptt` backend:
   - vectorized reset/step over `num_envs`
   - differentiable `lax.scan` unroll through MJX dynamics

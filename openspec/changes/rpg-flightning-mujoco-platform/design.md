@@ -258,6 +258,150 @@ Consequences:
 - Positive: delivery claims become auditable.
 - Positive: agents cannot lower standards by citing a successful smoke run.
 - Negative: acceptance runs are slower than smoke tests.
+
+### ADR-004: Algorithm Backends SHALL Follow The Proven Reference Patterns
+
+Status: Accepted
+
+Context:
+
+This change has two concrete upstream references for non-smoke learning
+backends:
+
+- `third_party/mujoco/mjx/training_apg.ipynb`
+- `third_party/jax_shac/shac/`
+
+Earlier agent work drifted into "wiring first, semantics later", which produced
+CLI-compatible but algorithmically weakened backends. The platform now needs an
+explicit reference map so future agents know which parts are mandatory and which
+parts are task-specific adaptations.
+
+Decision:
+
+Treat the MuJoCo MJX APG notebook as the reference for the `bptt` track, and
+treat `third_party/jax_shac/shac` as the reference for the `shac` track. The
+project-owned backends may adapt interfaces and artifact paths, but they SHALL
+preserve the training semantics listed below.
+
+Consequences:
+
+- Positive: future agents have a concrete checklist for what "real backend"
+  means.
+- Positive: compile/performance tradeoffs can be evaluated against proven
+  reference patterns instead of ad hoc guesses.
+- Negative: local backends must sometimes diverge from the simplest possible
+  implementation to preserve algorithm semantics.
+
+## Reference Implementation Map
+
+### Reference A: MJX APG Notebook
+
+Source:
+
+- `third_party/mujoco/mjx/training_apg.ipynb`
+
+Observed reference pattern:
+
+- The notebook frames APG/FoPG/BPTT as differentiable policy learning through
+  MJX, not as a stochastic RL surrogate.
+- It uses Brax APG directly via `brax.training.agents.apg.train`.
+- The key training budget parameters are:
+  - `policy_updates`
+  - `horizon_length`
+  - `num_envs`
+  - `num_eval_envs`
+  - `normalize_observations`
+  - `use_float64=True`
+- The environment class wraps `pipeline_step` with `jax.checkpoint(...)` to
+  reduce compile time and memory pressure during long differentiable rollouts.
+- The notebook explicitly distinguishes APG-friendly setups from PPO-friendly
+  setups:
+  - APG succeeds when rewards are dense, precise, and local.
+  - APG benefits from a good initial policy and residual learning when the task
+    is hard.
+- The locomotion example uses residual learning against a frozen baseline policy
+  instead of learning the full policy from scratch.
+
+Implications for this project:
+
+- `bptt` is not merely "differentiate episode reward end-to-end once". It SHALL
+  be structured as a short-horizon FoPG backend with explicit horizon control.
+- `bptt` task configs SHALL expose horizon-like parameters rather than hiding
+  them behind only `epochs` and `steps`.
+- For long differentiable MJX rollouts, the env/dynamics path SHOULD use
+  rematerialization (`jax.checkpoint`) where it preserves semantics and reduces
+  compile or memory cost.
+- Tasks intended for `bptt` acceptance SHALL use dense and informative reward
+  shaping. If a task fundamentally depends on sparse/discontinuous reward, that
+  mismatch must be documented instead of silently blamed on the optimizer.
+- When a scene is too hard for from-scratch FoPG learning, baseline or residual
+  policy initialization is an acceptable design, but it must be explicit in the
+  config and metrics.
+
+### Reference B: `jax_shac`
+
+Source:
+
+- `third_party/jax_shac/shac/train.py`
+- `third_party/jax_shac/shac/losses.py`
+
+Observed reference pattern:
+
+- The backend is actor-critic, not pure policy gradient.
+- The env is wrapped with `EpisodeWrapper` plus autoreset behavior before
+  vectorized reset/step.
+- Reset is compiled as `jax.jit(jax.vmap(env.reset))`.
+- The backend builds explicit policy and value networks, plus optional
+  observation normalization.
+- Policy and value each have their own Optax optimizer state.
+- SHAC actor loss is computed on short differentiable rollouts.
+- Critic targets use TD-lambda style returns from
+  `compute_td_lambda_vals(...)`.
+- The implementation distinguishes truncation from terminal transitions and
+  handles autoreset semantics carefully inside loss computation.
+- The backend is designed around `unroll_length`, `critic_batch_size`, and
+  `critic_epochs`, not around one generic "episode loop".
+
+Implications for this project:
+
+- `shac.py` SHALL remain a project-owned adaptation, but it must preserve:
+  - separate actor/value parameter trees and optimizer states
+  - short-horizon actor loss
+  - TD-lambda or equivalent short-horizon critic target computation
+  - explicit truncation versus termination handling
+  - vectorized reset/rollout semantics
+- `shac` configs SHALL expose `unroll_length`, `critic_batch_size`,
+  `critic_epochs`, `discounting`, `lambda_`, and actor/value learning rates.
+- A thin wrapper around third-party entrypoints is not enough if it hides these
+  semantics or blocks checkpoint/eval/render/play integration.
+
+## Backend Design Constraints Derived From References
+
+These are mandatory implementation constraints for future agent work.
+
+### BPTT / APG Constraints
+
+- Keep APG folded into the public `bptt` track for this change, but preserve
+  APG semantics from the MJX notebook.
+- Prefer explicit short-horizon unroll configuration over one monolithic full
+  episode reverse pass.
+- Document whether each task is trained from scratch or from a baseline/residual
+  policy.
+- If compile time is high, first apply reference-consistent mitigations:
+  - shorter horizon
+  - fixed shapes and stable batch sizes
+  - rematerialization/checkpointing on heavy pipeline steps
+  - persistent compilation cache
+  rather than replacing the backend with a non-differentiable fallback.
+
+### SHAC Constraints
+
+- Preserve actor/value separation and short-horizon update structure.
+- Preserve the environment truncation contract in losses and replay buffers.
+- Keep checkpoint outputs under `artifacts/`, but do not simplify away the
+  critic update path just to make the CLI shorter.
+- Any local simplification must state exactly which `jax_shac` semantic is still
+  preserved and which is intentionally deferred.
 - Negative: thresholds must be calibrated and versioned with configs.
 
 Alternatives considered:

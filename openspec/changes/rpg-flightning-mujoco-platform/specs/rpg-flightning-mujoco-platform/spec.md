@@ -65,6 +65,36 @@ BPTT SHALL use a real differentiable training backend: vectorized JAX rollout th
 SHAC SHALL use a real `jax_shac` adapter backend: clean dependency imports, no runtime monkey patches, explicit actor/value update configuration, checkpoint/eval/render compatibility, and reward-improvement gates.
 Smoke-only or baseline rollout adapters SHALL NOT satisfy this requirement for any algorithm.
 
+#### Scenario: BPTT Reference Semantics
+- **GIVEN** the project uses `bptt` as the public name for the differentiable policy-gradient track
+- **WHEN** implementing or modifying the `bptt` backend
+- **THEN** the implementation SHALL preserve the short-horizon FoPG or APG semantics shown in `third_party/mujoco/mjx/training_apg.ipynb`
+- **AND** it SHALL expose horizon-like configuration rather than hiding all rollout length decisions behind only generic epoch counters
+- **AND** compile-time mitigations SHALL prefer reference-consistent techniques such as rematerialization, fixed shapes, and shorter differentiable horizons rather than substituting a non-differentiable fallback
+
+#### Scenario: BPTT Reward And Initialization Contract
+- **GIVEN** a task is accepted as `bptt`-trainable for this platform
+- **WHEN** defining its reward and initialization strategy
+- **THEN** the task SHALL use dense or otherwise information-rich reward terms appropriate for first-order policy gradients
+- **AND** any use of residual learning or baseline policy initialization SHALL be explicit in config, metrics, or task documentation
+- **AND** a task that fundamentally depends on sparse or discontinuous reward SHALL document that mismatch instead of being silently counted as a backend failure
+
+#### Scenario: SHAC Reference Semantics
+- **GIVEN** the project uses `third_party/jax_shac/shac` as the reference implementation for `shac`
+- **WHEN** implementing or modifying `src/dva_quadrotor_mjx/algorithms/shac.py`
+- **THEN** the backend SHALL preserve separate actor and value parameter or optimizer states
+- **AND** it SHALL preserve short-horizon actor updates plus TD-lambda or equivalent critic target computation
+- **AND** it SHALL preserve explicit truncation-versus-termination handling in rollout or loss computation
+- **AND** it SHALL keep vectorized reset and rollout semantics compatible with checkpoint, eval, render, and play flows
+
+#### Scenario: Algorithm Reference Disclosure
+- **GIVEN** a backend is claimed complete or substantially revised
+- **WHEN** reviewing the implementation
+- **THEN** the design or code review record SHALL state which reference implementation was followed:
+  `third_party/mujoco/mjx/training_apg.ipynb` for `bptt` and
+  `third_party/jax_shac/shac` for `shac`
+- **AND** any intentional semantic deviation from those references SHALL be documented explicitly
+
 #### Scenario: Smoke Training Matrix
 - **GIVEN** `scripts/train.py` supports `--env`, `--algo`, and `--smoke`
 - **WHEN** running the smoke matrix for `hover_obstacle`, `gate_crossing`, and `forest_navigation` across `bptt`, `ppo`, and `shac`
