@@ -22,6 +22,7 @@ import numpy as np
 from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
 from dva_quadrotor_mjx.envs.registry import load
 from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+from dva_quadrotor_mjx.learning.shac_checkpoint import load_policy as load_shac_policy
 from dva_quadrotor_mjx.policies import SUPPORTED_ALGOS, create_train_state, make_network, select_action
 from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
@@ -33,17 +34,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint")
     parser.add_argument("--random-policy", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--steps", type=int, default=300)
+    parser.add_argument("--steps", type=int, default=2)
     parser.add_argument("--output", type=str, default="artifacts/render.mp4")
-    parser.add_argument("--width", type=int, default=1280)
-    parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--width", type=int, default=160)
+    parser.add_argument("--height", type=int, default=128)
     args = parser.parse_args(argv)
 
     env = NormalizeActionWrapper(load(args.env))
     base_env = getattr(env, "env", env)
-    ppo_policy = load_ppo_policy(args.checkpoint) if args.algo == "ppo" and args.checkpoint else None
+    loaded_policy = None
+    if args.checkpoint and args.algo == "ppo":
+        loaded_policy = load_ppo_policy(args.checkpoint)
+    if args.checkpoint and args.algo == "shac":
+        loaded_policy = load_shac_policy(args.checkpoint, env)
     train_state = None
-    if ppo_policy is None:
+    if loaded_policy is None:
         network = make_network(args.algo, env.action_space.shape[0])
         train_state = create_train_state(
             network,
@@ -65,8 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         key, action_key = jax.random.split(key)
         if args.random_policy:
             action = jax.random.uniform(action_key, (env.action_space.shape[0],), minval=-1.0, maxval=1.0)
-        elif ppo_policy is not None:
-            action = ppo_policy(state.obs, action_key)[0]
+        elif loaded_policy is not None:
+            action = loaded_policy(state.obs, action_key)[0]
         else:
             action = select_action(train_state, state.obs)
         state = env.step(state, action)
@@ -80,15 +85,19 @@ def main(argv: list[str] | None = None) -> int:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        import imageio.v2 as imageio
+    import imageio.v2 as imageio
 
+    try:
         imageio.mimsave(output, frames, fps=30)
-        print(f"Rendered video: {output}")
     except Exception as exc:
-        fallback = output.with_suffix(".npz")
-        np.savez_compressed(fallback, frames=np.asarray(frames))
-        print(f"Video writer unavailable ({exc}); wrote frames: {fallback}")
+        raise RuntimeError(
+            "MP4 video writer unavailable; install an imageio ffmpeg backend "
+            "and rerun render.py. Frame-dump fallback is intentionally disabled "
+            "by the OpenSpec render acceptance contract."
+        ) from exc
+    if not output.exists() or output.stat().st_size == 0:
+        raise RuntimeError(f"Render output was not written or is empty: {output}")
+    print(f"Rendered video: {output}")
     return 0
 
 

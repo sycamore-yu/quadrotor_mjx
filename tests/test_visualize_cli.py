@@ -10,5 +10,5 @@ def test_visualize_check_scene_does_not_import_viewer_server(capsys):
 
     assert main(["--env", "hover_obstacle", "--mode", "scene", "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "Scene check passed" in output
-    assert "env=hover_obstacle" in output
+    assert "dry-run scene check passed" in output.lower()
+    assert "hover_obstacle" in output

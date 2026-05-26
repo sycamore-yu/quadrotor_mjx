@@ -21,6 +21,7 @@ from dva_quadrotor_mjx.algorithms.trainer import eval as eval_policy
 from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
 from dva_quadrotor_mjx.envs.registry import load
 from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+from dva_quadrotor_mjx.learning.shac_checkpoint import load_policy as load_shac_policy
 from dva_quadrotor_mjx.policies import SUPPORTED_ALGOS, create_train_state, make_network
 from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
@@ -31,13 +32,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--algo", choices=SUPPORTED_ALGOS, required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--steps", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args(argv)
 
     env = NormalizeActionWrapper(load(args.env))
-    if args.algo == "ppo":
-        policy = load_ppo_policy(args.checkpoint)
+    if args.algo in ("ppo", "shac"):
+        policy = (
+            load_ppo_policy(args.checkpoint)
+            if args.algo == "ppo"
+            else load_shac_policy(args.checkpoint, env)
+        )
         result = _eval_brax_policy(policy, env, args.episodes, args.seed, args.steps)
         print(f"Mean reward: {result['mean_reward']:.6f}")
         print(f"Mean episode length: {result['mean_episode_length']:.2f}")

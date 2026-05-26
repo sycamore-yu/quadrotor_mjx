@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pytest
 
 from dva_quadrotor_mjx.envs import load
-from jax_shac.shac.train import SHAC
+from dva_quadrotor_mjx.algorithms.shac.train import SHAC
 
 def test_m3_shac_integration() -> None:
     """M3.1 & M3.2: Verify HoveringStateEnv can be loaded into SHAC and complete one training epoch."""

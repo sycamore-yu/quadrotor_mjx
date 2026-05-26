@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ import numpy as np
 from dva_quadrotor_mjx.algorithms.trainer import load_checkpoint
 from dva_quadrotor_mjx.envs.registry import load
 from dva_quadrotor_mjx.learning.ppo_checkpoint import load_policy as load_ppo_policy
+from dva_quadrotor_mjx.learning.shac_checkpoint import load_policy as load_shac_policy
 from dva_quadrotor_mjx.policies import SUPPORTED_ALGOS, create_train_state, make_network, select_action
 from dva_quadrotor_mjx.wrappers.normalize import NormalizeActionWrapper
 
@@ -39,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         "--check-scene",
         action="store_true",
         dest="dry_run",
-        help="Construct the scene and policy path without starting a viser server.",
+        help="Construct the scene and policy path without starting a viser server; "
+        "prints a machine-readable dry-run plan.",
     )
     args = parser.parse_args(argv)
 
@@ -50,9 +53,13 @@ def main(argv: list[str] | None = None) -> int:
     key = jax.random.PRNGKey(args.seed)
     state_box = {"state": env.reset(key), "key": key, "steps": 0}
 
-    ppo_policy = load_ppo_policy(args.checkpoint) if args.algo == "ppo" and args.checkpoint else None
+    loaded_policy = None
+    if args.checkpoint and args.algo == "ppo":
+        loaded_policy = load_ppo_policy(args.checkpoint)
+    if args.checkpoint and args.algo == "shac":
+        loaded_policy = load_shac_policy(args.checkpoint, env)
     train_state = None
-    if ppo_policy is None:
+    if loaded_policy is None:
         network = make_network(args.algo, env.action_space.shape[0])
         train_state = create_train_state(
             network,
@@ -61,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             learning_rate=3e-4,
         )
     if args.checkpoint:
-        if ppo_policy is None:
+        if loaded_policy is None:
             train_state = load_checkpoint(Path(args.checkpoint), train_state)
         args.mode = "checkpoint"
 
@@ -79,8 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         state_box["key"], action_key = jax.random.split(state_box["key"])
         if args.mode == "random":
             action = jax.random.uniform(action_key, (env.action_space.shape[0],), minval=-1.0, maxval=1.0)
-        elif ppo_policy is not None:
-            action = ppo_policy(state_box["state"].obs, action_key)[0]
+        elif loaded_policy is not None:
+            action = loaded_policy(state_box["state"].obs, action_key)[0]
         else:
             action = select_action(train_state, state_box["state"].obs)
         state_box["state"] = env.step(state_box["state"], action)
@@ -92,10 +99,20 @@ def main(argv: list[str] | None = None) -> int:
 
     copy_state_to_mujoco()
     if args.dry_run:
-        print(
-            f"Scene check passed: env={args.env} mode={args.mode} "
-            f"nq={model.nq} nv={model.nv} steps={args.steps}"
-        )
+        plan = {
+            "algo": args.algo,
+            "checkpoint": args.checkpoint,
+            "env": args.env,
+            "mode": args.mode,
+            "nq": int(model.nq),
+            "nv": int(model.nv),
+            "port": args.port,
+            "seed": args.seed,
+            "steps": args.steps,
+            "viewer_started": False,
+        }
+        print("Dry-run scene check passed (viewer not started)")
+        print(json.dumps(plan, sort_keys=True))
         return 0
 
     import viser
