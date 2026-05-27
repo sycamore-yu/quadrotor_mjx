@@ -224,6 +224,7 @@ def _train_jax_shac(
         seed=seed,
         checkpoint_dir=str(checkpoint_dir),
         eval_env=kwargs.pop("eval_env", env),
+        num_evals=num_epochs + 1,
         **kwargs,
     )
     train_time = time.time() - start
