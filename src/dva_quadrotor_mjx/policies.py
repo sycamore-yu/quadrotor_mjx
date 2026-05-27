@@ -62,10 +62,18 @@ def create_train_state(
     """Initializes a TrainState template shared by train/eval/render scripts."""
 
     params = network.init(jax.random.PRNGKey(seed), jnp.zeros(obs_shape))
+    if isinstance(network, DeterministicMLP):
+        tx = optax.chain(
+            optax.clip(1.0),
+            optax.adam(learning_rate, b1=0.7, b2=0.95),
+        )
+    else:
+        tx = optax.adam(learning_rate)
+
     return TrainState.create(
         apply_fn=network.apply,
         params=params,
-        tx=optax.adam(learning_rate),
+        tx=tx,
     )
 
 
