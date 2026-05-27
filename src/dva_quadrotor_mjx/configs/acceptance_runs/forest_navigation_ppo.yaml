@@ -2,7 +2,7 @@ env: forest_navigation
 algo: ppo
 train_seeds: [0, 1]
 eval_seeds: [100, 101]
-num_epochs: 12
+num_epochs: 30
 num_steps_per_epoch: 200
 num_envs: 256
 learning_rate: 0.0003

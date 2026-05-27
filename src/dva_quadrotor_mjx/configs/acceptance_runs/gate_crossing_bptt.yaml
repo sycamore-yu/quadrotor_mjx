@@ -2,7 +2,7 @@ env: gate_crossing
 algo: bptt
 train_seeds: [0, 1]
 eval_seeds: [100, 101]
-num_epochs: 6
+num_epochs: 60
 num_steps_per_epoch: 64
 num_envs: 16
 learning_rate: 0.001
