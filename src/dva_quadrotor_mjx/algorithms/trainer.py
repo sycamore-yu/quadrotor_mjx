@@ -112,6 +112,7 @@ def train(
     if algo == "shac":
         return _train_jax_shac(
             env,
+            network=network,
             num_epochs=num_epochs,
             num_steps_per_epoch=num_steps_per_epoch,
             num_envs=num_envs,
@@ -188,6 +189,7 @@ def _train_jax_bptt(
 def _train_jax_shac(
     env,
     *,
+    network,
     num_epochs: int,
     num_steps_per_epoch: int,
     num_envs: int,
@@ -212,6 +214,7 @@ def _train_jax_shac(
     if num_timesteps == 0:
         return _init_jax_shac_checkpoint(
             env,
+            network=network,
             checkpoint_dir=checkpoint_dir,
             num_steps_per_epoch=num_steps_per_epoch,
             num_envs=num_envs,
@@ -222,8 +225,8 @@ def _train_jax_shac(
     start = time.time()
     result = _shac_train(
         env,
-        policy_network=None,
-        value_network=None,
+        policy_network=network,
+        value_network=network,
         num_timesteps=num_timesteps,
         episode_length=num_steps_per_epoch,
         num_envs=num_envs,
@@ -253,6 +256,7 @@ def _train_jax_shac(
 def _init_jax_shac_checkpoint(
     env,
     *,
+    network,
     checkpoint_dir: Path,
     num_steps_per_epoch: int,
     num_envs: int,
