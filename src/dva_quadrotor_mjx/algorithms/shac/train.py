@@ -217,10 +217,13 @@ class SHAC:
         # assert num_envs % device_count == 0
 
         env = environment
+        # Add VmapWrapper to support batch operations (num_envs > 1)
+        from brax.envs.wrappers.training import VmapWrapper
+        env = VmapWrapper(env)
         env = brax_wrappers.AutoResetWrapper(orig_wraps.EpisodeWrapper(env, episode_length, action_repeat=1))
         if resample_init:
             env = brax_wrappers.AutoSampleInitQ(env)
-        
+
         self.env = env
         
         self.reset_fn = jax.jit(jax.vmap(env.reset))
