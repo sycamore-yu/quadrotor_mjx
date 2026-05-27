@@ -11,7 +11,7 @@ def configure_jax_runtime(*, cache_subdir: str = "jax_cache") -> Path | None:
     if "--xla_gpu_triton_gemm_any=True" not in xla_flags:
         xla_flags = f"{xla_flags} --xla_gpu_triton_gemm_any=True".strip()
     os.environ["XLA_FLAGS"] = xla_flags
-    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     os.environ.setdefault("MUJOCO_GL", "egl")
 
     if os.environ.get("DVA_JAX_ENABLE_COMPILATION_CACHE", "1") == "0":

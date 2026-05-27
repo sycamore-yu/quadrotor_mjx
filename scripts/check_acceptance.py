@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dva_quadrotor_mjx.utils.jax_runtime import configure_jax_runtime
+configure_jax_runtime()
+
 import argparse
 import json
 import sys
