@@ -1,0 +1,22 @@
+env: gate_crossing
+algo: bptt
+train_seeds: [0, 1]
+eval_seeds: [10, 11]
+num_epochs: 1
+num_steps_per_epoch: 1
+num_envs: 1
+learning_rate: 0.001
+thresholds:
+  min_reward_delta: 0.0
+  primary_metric_name: gates_crossed
+  primary_metric_direction: max
+  primary_metric_threshold: 1.0
+  primary_metric_vs_random_delta: 0.0
+  additional_metrics:
+    - name: collision
+      direction: min
+      threshold: 0.0
+      vs_random_delta: 0.0
+output_dir: artifacts/acceptance_results/gate_crossing/bptt
+train_kwargs: {}
+eval_kwargs: {}

@@ -549,3 +549,165 @@ def test_render_fails_loudly_when_mp4_writer_is_unavailable(monkeypatch, tmp_pat
             ]
         )
     assert not output_path.with_suffix(".npz").exists()
+
+
+def test_ppo_eval_cli_uses_ppo_loader(monkeypatch, tmp_path, capsys):
+    """Eval must dispatch PPO checkpoints through the PPO loader path."""
+
+    checkpoint_path = tmp_path / "checkpoint"
+    checkpoint_path.mkdir()
+    (checkpoint_path / "ppo_network_config.json").write_text(
+        '{"observation_size": 23, "action_size": 4, "normalize_observations": false}'
+    )
+    env = _patch_dummy_env(monkeypatch, eval_script)
+
+    seen = {}
+
+    def fake_load_policy(path):
+        seen["path"] = Path(path)
+
+        def policy(obs, key):
+            assert obs.shape == (23,)
+            return jnp.zeros((4,), dtype=jnp.float32), {}
+
+        return policy
+
+    monkeypatch.setattr(eval_script, "load_ppo_policy", fake_load_policy)
+
+    exit_code = eval_script.main(
+        [
+            "--env",
+            "dummy",
+            "--algo",
+            "ppo",
+            "--checkpoint",
+            str(checkpoint_path),
+            "--episodes",
+            "1",
+            "--steps",
+            "2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert seen["path"] == checkpoint_path
+    assert "Mean reward:" in captured.out
+
+
+def test_ppo_render_cli_uses_ppo_loader(monkeypatch, tmp_path):
+    """Render must dispatch PPO checkpoints through the PPO loader path."""
+
+    checkpoint_path = tmp_path / "checkpoint"
+    checkpoint_path.mkdir()
+    (checkpoint_path / "ppo_network_config.json").write_text(
+        '{"observation_size": 23, "action_size": 4, "normalize_observations": false}'
+    )
+    output_path = tmp_path / "render.mp4"
+    env = _patch_dummy_env(monkeypatch, render_script)
+
+    def fake_load_policy(path):
+        assert Path(path) == checkpoint_path
+
+        def policy(obs, key):
+            assert obs.shape == (23,)
+            return jnp.zeros((4,), dtype=jnp.float32), {}
+
+        return policy
+
+    class _FakeMjData:
+        def __init__(self, model):
+            self.qpos = np.zeros(int(model.nq), dtype=np.float32)
+            self.qvel = np.zeros(int(model.nv), dtype=np.float32)
+
+    class _FakeRenderer:
+        def __init__(self, model, height, width):
+            self.model = model
+            self.height = height
+            self.width = width
+
+        def update_scene(self, data):
+            self.data = data
+
+        def render(self):
+            return np.zeros((2, 2, 3), dtype=np.uint8)
+
+    def fake_mimsave(path, frames, fps):
+        Path(path).write_bytes(b"fake-mp4")
+        assert frames
+        assert fps == 30
+
+    monkeypatch.setattr(render_script, "load_ppo_policy", fake_load_policy)
+    monkeypatch.setattr(render_script.mujoco, "MjData", _FakeMjData)
+    monkeypatch.setattr(render_script.mujoco, "Renderer", _FakeRenderer)
+    monkeypatch.setattr(render_script.mujoco, "mj_forward", lambda model, data: None)
+
+    import imageio.v2 as imageio_v2
+
+    monkeypatch.setattr(imageio_v2, "mimsave", fake_mimsave)
+
+    exit_code = render_script.main(
+        [
+            "--env",
+            "dummy",
+            "--algo",
+            "ppo",
+            "--checkpoint",
+            str(checkpoint_path),
+            "--steps",
+            "1",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert output_path.exists()
+    assert output_path.stat().st_size > 0
+
+
+def test_ppo_play_dry_run_uses_ppo_loader(monkeypatch, tmp_path, capsys):
+    """Play dry-run must dispatch PPO checkpoints through the PPO loader path."""
+
+    checkpoint_path = tmp_path / "checkpoint"
+    checkpoint_path.mkdir()
+    (checkpoint_path / "ppo_network_config.json").write_text(
+        '{"observation_size": 23, "action_size": 4, "normalize_observations": false}'
+    )
+    env = _patch_dummy_env(monkeypatch, play_script)
+
+    def fake_load_policy(path):
+        assert Path(path) == checkpoint_path
+
+        def policy(obs, key):
+            assert obs.shape == (23,)
+            return jnp.zeros((4,), dtype=jnp.float32), {}
+
+        return policy
+
+    class _FakeMjData:
+        def __init__(self, model):
+            self.qpos = np.zeros(int(model.nq), dtype=np.float32)
+            self.qvel = np.zeros(int(model.nv), dtype=np.float32)
+
+    monkeypatch.setattr(play_script, "load_ppo_policy", fake_load_policy)
+    monkeypatch.setattr(play_script.mujoco, "MjData", _FakeMjData)
+    monkeypatch.setattr(play_script.mujoco, "mj_forward", lambda model, data: None)
+
+    exit_code = play_script.main(
+        [
+            "--env",
+            "dummy",
+            "--algo",
+            "ppo",
+            "--checkpoint",
+            str(checkpoint_path),
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Dry-run scene check passed" in captured.out
+    assert '"mode": "checkpoint"' in captured.out
+

@@ -503,6 +503,11 @@ def _evaluate_metric_gate(
     final_value: float,
     random_value: float,
 ) -> list[str]:
+    import math
+
+    if math.isnan(final_value):
+        return [f"{name} is NaN"]
+
     failures: list[str] = []
     if direction == "max":
         if final_value < threshold:
@@ -625,6 +630,12 @@ def _evaluate_policy_on_seeds(
     import jax
     import jax.numpy as jnp
     import numpy as np
+    from dva_quadrotor_mjx.envs.base import rollout
+
+    # JIT-compile the rollout function. Redefinitions are cached by closure.
+    @jax.jit
+    def run_one_episode(key):
+        return rollout(env, key, policy_fn, num_steps=steps)
 
     episode_records: list[dict[str, Any]] = []
     all_successes: list[bool] = []
@@ -633,29 +644,51 @@ def _evaluate_policy_on_seeds(
         for episode_index in range(max(int(episodes), 1)):
             episode_seed = int(seed) + episode_index
             key = jax.random.PRNGKey(episode_seed)
-            state = env.reset(key)
-            total_reward = 0.0
-            episode_length = 0
-            success = False
-            collision = False
-            for _ in range(int(steps)):
-                key, action_key = jax.random.split(key)
-                action = policy_fn(state.obs, action_key)
-                state = env.step(state, action)
-                total_reward += float(jnp.asarray(state.reward))
-                episode_length += 1
-                success = success or bool(jnp.asarray(state.info.get("success", False)))
-                collision = collision or bool(jnp.asarray(state.info.get("collision", False)))
-                if bool(jnp.asarray(state.done)):
-                    break
+            
+            # Execute compiled rollout on GPU
+            states = run_one_episode(key)
+            
+            # Convert JAX arrays to NumPy arrays ONCE to avoid multiple round-trips
+            dones = np.asarray(states.done)
+            done_indices = np.where(dones)[0]
+            length = int(done_indices[0]) if done_indices.size > 0 else int(steps)
+            
+            # Extract terminal state info and metrics
+            terminal_state = jax.tree_util.tree_map(lambda x: x[length], states)
+            terminal_info = _jsonable(getattr(terminal_state, "info", {}))
+            terminal_metrics = _jsonable(getattr(terminal_state, "metrics", {}))
+            
+            rewards = np.asarray(states.reward)
+            total_reward = float(np.sum(rewards[1:length+1]))
+            
+            successes = states.info.get("success")
+            if successes is not None:
+                successes = np.asarray(successes)
+                if successes.ndim > 0:
+                    success = bool(np.any(successes[:length+1]))
+                else:
+                    success = bool(successes)
+            else:
+                success = False
+                
+            collisions = states.info.get("collision")
+            if collisions is not None:
+                collisions = np.asarray(collisions)
+                if collisions.ndim > 0:
+                    collision = bool(np.any(collisions[:length+1]))
+                else:
+                    collision = bool(collisions)
+            else:
+                collision = False
+                
             metric_values = {
                 name: _extract_episode_metric_value(
-                    state,
+                    terminal_state,
                     metric_name=name,
                     fallback_reward=total_reward,
                     success=success,
                     collision=collision,
-                    episode_length=episode_length,
+                    episode_length=length,
                 )
                 for name in dict.fromkeys(metric_names)
             }
@@ -663,14 +696,14 @@ def _evaluate_policy_on_seeds(
             record = {
                 "seed": episode_seed,
                 "reward": total_reward,
-                "length": episode_length,
+                "length": length,
                 "success": success,
                 "collision": collision,
                 "primary_metric_name": primary_metric_name,
                 "primary_metric_value": primary_metric_value,
                 "metric_values": metric_values,
-                "terminal_info": _jsonable(getattr(state, "info", {})),
-                "terminal_metrics": _jsonable(getattr(state, "metrics", {})),
+                "terminal_info": terminal_info,
+                "terminal_metrics": terminal_metrics,
             }
             episode_records.append(record)
             all_successes.append(success)

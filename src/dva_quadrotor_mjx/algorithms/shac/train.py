@@ -217,10 +217,6 @@ class SHAC:
         # assert num_envs % device_count == 0
 
         env = environment
-        # Add VmapWrapper to support batch operations (num_envs > 1)
-        # Note: SHAC already handles batching of rng keys, so we don't pass batch_size
-        from brax.envs.wrappers.training import VmapWrapper
-        env = VmapWrapper(env, batch_size=None)
         env = brax_wrappers.AutoResetWrapper(orig_wraps.EpisodeWrapper(env, episode_length, action_repeat=1))
         if resample_init:
             env = brax_wrappers.AutoSampleInitQ(env)
@@ -788,6 +784,7 @@ class SHAC:
             writer = SummaryWriter(str(log_dir))
         
         key_envs = jax.random.split(key_env, self.num_envs)
+        print("key_envs shape before reset_fn:", key_envs.shape, "type:", type(key_envs))
         env_state = self.reset_fn(key_envs)
         p_shst = env_state.info['steps'].shape
 

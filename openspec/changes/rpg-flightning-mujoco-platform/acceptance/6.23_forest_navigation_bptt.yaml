@@ -1,0 +1,22 @@
+env: forest_navigation
+algo: bptt
+train_seeds: [0, 1]
+eval_seeds: [10, 11]
+num_epochs: 1
+num_steps_per_epoch: 1
+num_envs: 1
+learning_rate: 0.001
+thresholds:
+  min_reward_delta: 0.0
+  primary_metric_name: dist_to_goal
+  primary_metric_direction: min
+  primary_metric_threshold: 8.0
+  primary_metric_vs_random_delta: 0.0
+  additional_metrics:
+    - name: collision
+      direction: min
+      threshold: 0.0
+      vs_random_delta: 0.0
+output_dir: artifacts/acceptance_results/forest_navigation/bptt
+train_kwargs: {}
+eval_kwargs: {}

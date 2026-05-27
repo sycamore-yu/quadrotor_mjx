@@ -173,6 +173,8 @@ class HoveringStateEnv(MjxEnv):
         )
 
     def reset(self, rng: jax.Array) -> State:
+        # Debugging the RNG
+        jax.debug.print("HoveringStateEnv rng: {rng}, shape: {shape}, type: {type}", rng=rng, shape=rng.shape, type=type(rng))
         key_p, key_R, key_v, key_omega = jax.random.split(rng, 4)
 
         # Randomize position within margins
