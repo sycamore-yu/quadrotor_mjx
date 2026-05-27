@@ -218,8 +218,9 @@ class SHAC:
 
         env = environment
         # Add VmapWrapper to support batch operations (num_envs > 1)
+        # Note: SHAC already handles batching of rng keys, so we don't pass batch_size
         from brax.envs.wrappers.training import VmapWrapper
-        env = VmapWrapper(env)
+        env = VmapWrapper(env, batch_size=None)
         env = brax_wrappers.AutoResetWrapper(orig_wraps.EpisodeWrapper(env, episode_length, action_repeat=1))
         if resample_init:
             env = brax_wrappers.AutoSampleInitQ(env)
