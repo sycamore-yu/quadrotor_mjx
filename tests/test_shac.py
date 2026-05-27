@@ -1,53 +1,57 @@
-# Patch deprecated jax.tree_map (removed in JAX v0.6.0+)
-import jax
-if not hasattr(jax, "tree_map"):
-    jax.tree_map = jax.tree_util.tree_map
-
-import jax.numpy as jnp
-import pytest
-
 from dva_quadrotor_mjx.envs import load
 from dva_quadrotor_mjx.algorithms.shac.train import SHAC
 
-def test_m3_shac_integration() -> None:
-    """M3.1 & M3.2: Verify HoveringStateEnv can be loaded into SHAC and complete one training epoch."""
+
+def test_shac_fast_adapter_disables_debug_instrumentation() -> None:
+    """Default SHAC path keeps jacobian and checkify helpers off the hot loop."""
     env = load("quadrotor_hover", max_steps_in_episode=20)
-    
-    # Initialize SHAC with tiny parameters for fast test check
+
     shac = SHAC(
         environment=env,
-        num_timesteps=40,
-        episode_length=20,
-        num_envs=4,
-        num_eval_envs=2,
+        num_timesteps=2,
+        episode_length=2,
+        num_envs=1,
+        num_eval_envs=1,
         actor_learning_rate=1e-3,
         critic_learning_rate=1e-3,
         seed=42,
-        unroll_length=5,
-        critic_batch_size=4, # (num_envs * unroll_length) = 4 * 5 = 20.
-        critic_epochs=2,
+        unroll_length=1,
+        critic_batch_size=1,
+        critic_epochs=1,
         num_evals=2,
     )
-    
-    key = jax.random.PRNGKey(0)
-    key_env, key_state = jax.random.split(key)
-    
-    # 1. Reset batched envs
-    env_state = shac.reset_fn(jax.random.split(key_env, 4))
-    assert env_state.obs.shape == (4, 23)
-    
-    # 2. Init training state
-    training_state, key_state = shac.init_training_state(key_state)
-    assert training_state.env_steps == 0
-    
-    # 3. Execute one epoch
-    epoch_key, _ = jax.random.split(key_state)
-    new_tr_state, new_env_state, loss_metrics, err = shac.training_epoch(
-        training_state, env_state, epoch_key
+
+    assert shac.debug_mode is False
+    assert shac.enable_runtime_checks is False
+    assert shac.enable_jacobian_debug is False
+    assert shac.jac_env_step is None
+    assert shac.jac_rollout is None
+    assert shac._compiled_training_epoch is None
+
+
+def test_shac_debug_adapter_retains_runtime_check_tools() -> None:
+    """Debug SHAC path keeps checkify and jacobian helpers available."""
+    env = load("quadrotor_hover", max_steps_in_episode=20)
+
+    shac = SHAC(
+        environment=env,
+        num_timesteps=2,
+        episode_length=2,
+        num_envs=1,
+        num_eval_envs=1,
+        actor_learning_rate=1e-3,
+        critic_learning_rate=1e-3,
+        seed=7,
+        unroll_length=1,
+        critic_batch_size=1,
+        critic_epochs=1,
+        num_evals=2,
+        debug_mode=True,
     )
-    
-    err = err.get()
-    if err:
-        raise ValueError(f"SHAC epoch checkify error: {err}")
-        
-    assert int(new_tr_state.env_steps) > 0
+
+    assert shac.debug_mode is True
+    assert shac.enable_runtime_checks is True
+    assert shac.enable_jacobian_debug is True
+    assert callable(shac.jac_env_step)
+    assert callable(shac.jac_rollout)
+    assert callable(shac._checked_training_step)

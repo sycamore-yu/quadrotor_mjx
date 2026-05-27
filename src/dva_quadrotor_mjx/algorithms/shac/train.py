@@ -36,6 +36,8 @@ from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import optax
 
+from dva_quadrotor_mjx.utils.jax_runtime import configure_jax_runtime
+
 # Safe Coding
 import warnings
 from jax.experimental import checkify
@@ -48,6 +50,8 @@ from jaxtyping import Array, Shaped, jaxtyped, Shaped
 # releases.  Disable runtime typeguard instrumentation in this vendored adapter
 # while keeping the shape annotations as documentation.
 typechecker = None
+
+configure_jax_runtime()
 
 from . import losses as shac_losses # relative intra-package imports.
 from . import networks as shac_networks
@@ -116,6 +120,7 @@ class SHAC:
                  checkpoint_dir = None,
                  save_all_checkpoints = False,
                  save_all_policy_gradients = False,
+                 debug_mode: bool = False,
                  value_burn_in = 0,
                  progress_fn: Callable[[int, Metrics], None] = lambda *args: None,
                  eval_env: Optional[envs.Env] = None,
@@ -139,6 +144,11 @@ class SHAC:
         self.tbx_experiment_name = tbx_experiment_name
         self.save_all_checkpoints = save_all_checkpoints
         self.save_all_policy_gradients = save_all_policy_gradients
+        self.debug_mode = bool(
+            debug_mode or num_grad_checks is not None or save_all_policy_gradients
+        )
+        self.enable_runtime_checks = self.debug_mode
+        self.enable_jacobian_debug = self.debug_mode
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else Path(
             Path(__file__).parent, Path('checkpoints')
         )
@@ -160,6 +170,9 @@ class SHAC:
         
         #### misc
         self.training_walltime = 0
+        self.compile_time_seconds = 0.0
+        self.warmup_time_seconds = 0.0
+        self._compiled_training_epoch = None
         self.__file__ = __file__
         ####
         self.env_step_per_training_step = (
@@ -211,6 +224,7 @@ class SHAC:
         self.env = env
         
         self.reset_fn = jax.jit(jax.vmap(env.reset))
+        self._warmup_step = jax.jit(self.env.step)
 
         normalize = lambda x, y: x
         if normalize_observations:
@@ -269,16 +283,22 @@ class SHAC:
             self.policy_gradient_update_fn)
         
         self.critic_epoch = jax.jit(self.critic_epoch)    
+
+        self._checked_training_step = checkify.checkify(self.training_step)
+
+        self.training_epoch = jax.jit(
+            self.training_epoch,
+            donate_argnums=(0, 1),
+        )
         
-        self.training_step = checkify.checkify(self.training_step)
-    
-        self.training_epoch = jax.jit(self.training_epoch)
-        
-        # Code for debugging
-        self.jac_env_step = jax.jacfwd(self.jac_env_step, has_aux=True)
-        
-        self.jac_rollout = jax.jit(jax.vmap(self.jac_rollout,
-            in_axes=(None,)*2 + (0,)*2 + (None,)), static_argnames="unroll_length")
+        # Debug jacobian tools are only needed in the slow diagnostic adapter.
+        if self.enable_jacobian_debug:
+            self.jac_env_step = jax.jacfwd(self.jac_env_step, has_aux=True)
+            self.jac_rollout = jax.jit(jax.vmap(self.jac_rollout,
+                in_axes=(None,)*2 + (0,)*2 + (None,)), static_argnames="unroll_length")
+        else:
+            self.jac_env_step = None
+            self.jac_rollout = None
     
     # Import some code
     jac_env_step = fjac_env_step
@@ -434,14 +454,15 @@ class SHAC:
         check2 = jnp.where(agg < self.polgrad_thresh, 0, 1)
         check3 = jnp.isnan(agg)
 
-        checkify.check(check1 == 0,
-                       "Gradient ~ 0!",
-                       check1=check1)
-        checkify.check(check2 == 0,
-                       "Gradient too large! Policy not updated", check2=check2)
-        checkify.check(check3 == 0,
-                       "Gradient is nan!",
-                       check3=check3)
+        if self.enable_runtime_checks:
+            checkify.check(check1 == 0,
+                           "Gradient ~ 0!",
+                           check1=check1)
+            checkify.check(check2 == 0,
+                           "Gradient too large! Policy not updated", check2=check2)
+            checkify.check(check3 == 0,
+                           "Gradient is nan!",
+                           check3=check3)
         
         # Optimizer step
         params_update, noptimizer_state = self.policy_optimizer.update(
@@ -629,8 +650,12 @@ class SHAC:
         """ 
         If not for this, only 1 checkify error per epoch can get returned. Now it's 1 error per training step.
         """
-        err, (c, x) = self.training_step(carry, unused_t)
-        return c, (x, err)
+        if self.enable_runtime_checks:
+            err, (c, x) = self._checked_training_step(carry, unused_t)
+            return c, (x, err)
+
+        c, x = self.training_step(carry, unused_t)
+        return c, (x, None)
     
     def training_epoch(self, training_state: TrainingState, state: envs.State,
                         key: PRNGKey) -> Tuple[TrainingState, envs.State, Metrics]:
@@ -651,16 +676,17 @@ class SHAC:
         Wrapper around training_epoch to time it.
         """
         t = time.time()
-        training_state, env_state, metrics, err = self.training_epoch(
+        training_epoch = self._compiled_training_epoch or self.training_epoch
+        training_state, env_state, metrics, err = training_epoch(
             training_state, env_state, key)
         
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), metrics)
 
         #### CHECKIFYING
-        # err.throw()
-        err = err.get()
-        if err:
-            print(err)
+        if err is not None:
+            err = err.get()
+            if err:
+                print(err)
 
         #### TIMING ####
         epoch_training_time = time.time() - t
@@ -715,6 +741,31 @@ class SHAC:
 
         return training_state, key
 
+    def _warmup_env_step(self, env_state: envs.State) -> None:
+        warmup_action = jnp.zeros(
+            (self.num_envs, self.env.action_size),
+            dtype=env_state.obs.dtype,
+        )
+        warmup_state = self._warmup_step(env_state, warmup_action)
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), warmup_state)
+
+    def _prepare_training_epoch(
+        self,
+        training_state: TrainingState,
+        env_state: envs.State,
+        key: PRNGKey,
+    ) -> None:
+        if self._compiled_training_epoch is not None:
+            return
+
+        compile_start = time.time()
+        self._compiled_training_epoch = self.training_epoch.lower(
+            training_state,
+            env_state,
+            key,
+        ).compile()
+        self.compile_time_seconds = time.time() - compile_start
+
     def train(self):
         """ 
         1. Init batched environment states
@@ -741,6 +792,9 @@ class SHAC:
             env_state = self.scramble_times(env_state, key_scramble)
 
         assert env_state.info['steps'].shape == p_shst
+        warmup_start = time.time()
+        self._warmup_env_step(env_state)
+        self.warmup_time_seconds = time.time() - warmup_start
         
         if not self.eval_env:
             eval_env = self.env
@@ -771,7 +825,10 @@ class SHAC:
             self.progress_fn(0, metrics)
 
         self.training_walltime = 0
+        self.compile_time_seconds = 0.0
+        self.warmup_time_seconds = 0.0
         current_step = 0
+        metrics: Metrics = {}
         
         # Delete previous checkpoints
         print("Deleting old checkpoints!")
@@ -781,6 +838,8 @@ class SHAC:
             constituent.unlink()
         
         local_key, key = jax.random.split(key)
+        compile_key, local_key = jax.random.split(local_key)
+        self._prepare_training_epoch(training_state, env_state, compile_key)
         for it in range(self.num_evals_after_init):
             logging.info('starting iteration %s %s', it, time.time() - xt)
 
@@ -920,5 +979,7 @@ class SHAC:
         logging.info('total steps: %s', total_steps)
         policy_params = (training_state.normalizer_params, training_state.policy_params)
         value_params = (training_state.normalizer_params, training_state.target_value_params)
+        metrics["compile_time_seconds"] = self.compile_time_seconds
+        metrics["warmup_time_seconds"] = self.warmup_time_seconds
         return (self.make_policy, policy_params, value_params, metrics)
     

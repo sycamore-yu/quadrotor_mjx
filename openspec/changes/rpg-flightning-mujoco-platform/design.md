@@ -292,6 +292,99 @@ Consequences:
 - Negative: local backends must sometimes diverge from the simplest possible
   implementation to preserve algorithm semantics.
 
+### ADR-005: JAX Training Backends SHALL Use Compiled Update Loops With Explicit Fast/Debug Seams
+
+Status: Accepted
+
+Context:
+
+The current `rpg-flightning-mujoco-platform` change needs real `jax_bptt` and
+`jax_shac` backends that are operational on a remote headless server. The
+reference implementations converge on the same performance pattern:
+
+- Context7 JAX docs recommend putting iterative work inside `jax.lax.scan` or
+  `jax.lax.fori_loop`, timing on the host with `block_until_ready()`, using
+  persistent compilation cache, and donating large state arguments through
+  positional `donate_argnums`.
+- `third_party/brax/brax/training/agents/apg/train.py` folds horizon rollout
+  and update loops into compiled scans, keeps timing in a host wrapper, and
+  performs a reset-time warmup step to avoid later recompilation surprises.
+- `third_party/mujoco/mjx/training_apg.ipynb` wraps heavy pipeline steps with
+  `jax.checkpoint(...)` and keeps APG/BPTT training shape-stable.
+- `third_party/jax_shac/shac/train.py` preserves SHAC semantics but leaves the
+  outer epoch loop and debug helpers costly for the project’s headless
+  end-to-end path.
+
+The local call chain is `scripts/train.py -> algorithms.trainer -> {bptt,
+shac}`. This is the right boundary for compile cache, timing, backend metrics,
+and warmup policy.
+
+Decision:
+
+Adopt the following six rules as delivered architecture for this change:
+
+1. `jax_bptt` folds the outer optimization loop into a compiled update scan.
+   The hot path is `rollout scan -> train_epoch -> training_updates scan`
+   inside one jitted function. The public CLI still exposes epochs and steps,
+   while the backend runs them as one compiled program.
+2. Compile, warmup, and execute timing stay on the host. Each backend records
+   compile time from `lower(...).compile()`, warmup time from the reset-time
+   zero-action step, and execute time only after `block_until_ready()`.
+3. The first environment transition after reset is an explicit warmup step.
+   This follows the Brax APG adapter pattern and stabilizes the step-function
+   executable before the main training loop.
+4. `jax_shac` exposes two seams: a default fast adapter and an explicit debug
+   adapter. The fast adapter keeps runtime checks and Jacobian helpers out of
+   the hot loop. The debug adapter retains `checkify` and Jacobian tooling for
+   diagnosis.
+5. Donation is allowed only on state-heavy compiled update functions with
+   stable positional arguments. Duplicated or aliased leaves must be removed
+   from donated pytrees before donation is enabled.
+6. Shape discipline is part of the backend contract. `num_envs`,
+   `unroll_length`, `critic_batch_size`, observation/action shapes, and the
+   `info` pytree schema must stay stable across compiled calls. Shared
+   `configure_jax_runtime()` must run before the first training compile on all
+   public train/eval/render/play entrypoints.
+
+Consequences:
+
+- Positive: BPTT no longer pays Python-loop overhead per epoch and can reuse a
+  single compiled update program.
+- Positive: SHAC debugging cost is isolated behind an explicit seam, so the
+  default path matches the performance intent of Brax APG-style adapters.
+- Positive: timing artifacts become actionable because compile, warmup, and
+  execute costs are separated.
+- Positive: persistent cache and shape discipline become enforceable runtime
+  contracts instead of optional tuning tips.
+- Negative: direct unit tests that execute full SHAC compiled epochs are too
+  expensive for routine CI, so unit coverage focuses on the fast/debug seam,
+  while backend completion remains the responsibility of acceptance runs and
+  checkpoint/eval/render evidence.
+
+Alternatives considered:
+
+- Keep the SHAC outer loop and diagnostics in one always-on path: rejected
+  because it couples debugging cost to default training throughput.
+- Time JAX work with host wall-clock only: rejected because accelerator work is
+  asynchronous and needs `block_until_ready()` for accurate execution timing.
+- Donate entire runner pytrees without alias review: rejected because aliased
+  leaves cause runtime donation failures and unstable executables.
+- Solve compile pressure by lowering backend semantics to smoke rollouts:
+  rejected because this change requires real `jax_bptt` and `jax_shac`
+  backends.
+
+References:
+
+- Context7 JAX docs for `jax.lax.scan` / `jax.lax.fori_loop`, persistent
+  compilation cache, `block_until_ready()`, and `donate_argnums`
+- `third_party/brax/brax/training/agents/apg/train.py`
+- `third_party/mujoco/mjx/training_apg.ipynb`
+- `third_party/jax_shac/shac/train.py`
+- Local call-chain inspection of `scripts/train.py`,
+  `src/dva_quadrotor_mjx/algorithms/trainer.py`,
+  `src/dva_quadrotor_mjx/algorithms/bptt.py`, and
+  `src/dva_quadrotor_mjx/algorithms/shac/train.py`
+
 ## Reference Implementation Map
 
 ### Reference A: MJX APG Notebook

@@ -62,7 +62,7 @@ def _assert_params_match(actual: TrainState, expected: TrainState) -> None:
 
 
 def test_bptt_save_load_parity(tmp_path):
-    """Verify real BPTT checkpoints preserve params and action parity."""
+    """Verify compiled BPTT checkpoints preserve params and action parity."""
 
     env = _TinyBpttEnv()
     network = make_network("bptt", env.action_space.shape[0])
@@ -71,7 +71,7 @@ def test_bptt_save_load_parity(tmp_path):
         env,
         algo="bptt",
         network=network,
-        num_epochs=1,
+        num_epochs=2,
         num_steps_per_epoch=1,
         num_envs=2,
         seed=42,
@@ -80,12 +80,13 @@ def test_bptt_save_load_parity(tmp_path):
     assert result.metrics["backend"] == "jax_bptt"
     assert result.metrics["num_envs"] == 2
     assert isinstance(result.metrics["loss"], list)
-    assert len(result.metrics["loss"]) == 1
+    assert len(result.metrics["loss"]) == 2
     assert result.metrics["compile_time_seconds"] >= 0.0
+    assert result.metrics["warmup_time_seconds"] >= 0.0
     assert result.metrics["train_time_seconds"] >= 0.0
     assert result.metrics["sps"] > 0.0
     assert result.train_state is not None
-    assert result.train_state.step == 1
+    assert result.train_state.step == 2
 
     ckpt_path = tmp_path / "bptt_test.ckpt"
     trainer.save_checkpoint(ckpt_path, result.train_state)

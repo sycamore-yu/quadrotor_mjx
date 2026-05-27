@@ -21,6 +21,7 @@ import numpy as np
 from flax.training.train_state import TrainState
 
 from dva_quadrotor_mjx.policies import create_train_state, select_action
+from dva_quadrotor_mjx.utils.jax_runtime import configure_jax_runtime
 from dva_quadrotor_mjx.wrapper import wrap_for_brax_training
 
 
@@ -135,6 +136,8 @@ def _train_jax_bptt(
 ) -> TrainResult:
     """Trains BPTT through the differentiable JAX scan backend."""
 
+    configure_jax_runtime()
+
     from dva_quadrotor_mjx.algorithms import bptt
 
     train_state = create_train_state(
@@ -157,6 +160,8 @@ def _train_jax_bptt(
     final_train_state = runner_state.train_state
     train_time = time.time() - start
     compile_time = float(np.asarray(result.get("compile_time_seconds", 0.0)))
+    warmup_time = float(np.asarray(result.get("warmup_time_seconds", 0.0)))
+    execute_time = float(np.asarray(result.get("execute_time_seconds", 0.0)))
     loss_values = np.asarray(losses)
     mean_reward = float(-loss_values[-1]) if loss_values.size else float("nan")
     metrics = {
@@ -168,6 +173,8 @@ def _train_jax_bptt(
         "loss": loss_values.tolist(),
         "mean_reward": mean_reward,
         "compile_time_seconds": compile_time,
+        "warmup_time_seconds": warmup_time,
+        "execute_time_seconds": execute_time,
         "train_time_seconds": train_time,
         "sps": float(num_epochs * num_steps_per_epoch * num_envs / max(train_time, 1e-9)),
     }
@@ -189,6 +196,8 @@ def _train_jax_shac(
     **kwargs,
 ) -> TrainResult:
     """Trains SHAC through the vendored ``jax_shac`` backend."""
+
+    configure_jax_runtime()
 
     from dva_quadrotor_mjx.algorithms.shac._impl import (
         train as _shac_train,
@@ -319,6 +328,8 @@ def _train_brax_ppo(
     **kwargs,
 ) -> TrainResult:
     """Trains PPO through Brax's vectorized PPO agent."""
+
+    configure_jax_runtime()
 
     from brax.training.agents.ppo import networks as ppo_networks
     from brax.training.agents.ppo import train as ppo
